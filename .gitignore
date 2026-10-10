@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# 测试
+.pytest_cache/
+
+# 数据库（spec §8.3 b：删 qc.db 后下次启动自动建空库）
+qc.db
+
+# 备份目录（spec §8.2）
+backup/
+
+# 编辑器
+.vscode/
+.idea/

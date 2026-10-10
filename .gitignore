@@ -1,0 +1,4 @@
+qc.db
+__pycache__/
+*.pyc
+backup/

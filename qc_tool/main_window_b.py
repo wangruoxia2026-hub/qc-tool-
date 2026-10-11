@@ -437,83 +437,76 @@ class MainWindowB(QMainWindow):
         QMessageBox.information(self, "成功", f"模板已保存到 {path}")
 
     def _on_import(self):
+        """批量导入：选文件 → 解析 → 预览（可导出错误报告）→ 确认 → 入库。"""
         path, _ = QFileDialog.getOpenFileName(
             self, "选择 Excel 文件", "",
             "Excel Files (*.xlsx)",
         )
         if not path:
             return
-        xlsx = Path(path).read_bytes()
+        xlsx_bytes = Path(path).read_bytes()
         try:
-            plan = X.parse_import_xlsx_bytes(xlsx)
+            plan = X.parse_import_xlsx_bytes(xlsx_bytes)
         except M.MissingRequiredColumns as e:
-            QMessageBox.warning(self, "导入失败", f"缺少必需列：{','.join(e.columns)}")
+            QMessageBox.warning(
+                self, "导入失败",
+                f"缺少必需列：{', '.join(e.columns)}\n\n整批拒绝，请修正 Excel 后重新导入。",
+            )
             return
 
-        # 弹"导入预览"对话框（简单版）
-        msg = f"将导入 {len(plan.ok_rows)} 行；跳过 {len(plan.skipped_rows)} 行。\n"
-        if plan.skipped_rows:
-            msg += "\n跳过的行（前 5 条）：\n"
-            for s in plan.skipped_rows[:5]:
-                msg += f"  - 第 {s.original_row_no} 行：{s.reason}\n"
-        if QMessageBox.question(
-            self, "导入预览", msg,
-        ) != QMessageBox.StandardButton.Yes:
+        # 预览对话框
+        dlg = _ImportPreviewDialog(self, plan)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
 
-        # 解析项目 / 指标
+        # 确认导入
         def project_resolver(name: str):
             for p in P.list_projects(self.conn):
                 if p.name == name:
                     return p.id
             return None
 
-        # 查重
-        rows_for_dup = [
-            {"test_item_id": None, "level": r.level, "lot": r.lot,
-             "date": r.date, "seq": r.seq}
-            for r in plan.ok_rows
-        ]
-        # 解析 test_item_id
-        from . import projects as P2
+        # 解析 test_item_id 并填入 rows_for_dup
         ti_cache: dict[tuple[str, str, str], int] = {}
+        rows_for_dup: list[dict] = []
         for r in plan.ok_rows:
             pid = project_resolver(r.project_name)
             if pid is None:
-                QMessageBox.warning(self, "导入失败",
-                                    f"项目 {r.project_name} 不存在，请先创建项目")
+                QMessageBox.warning(
+                    self, "导入失败",
+                    f"项目 {r.project_name} 不存在，请先创建项目。",
+                )
                 return
             key = (r.test_item_name, r.project_name, r.level)
             if key not in ti_cache:
-                items = P2.list_test_items(self.conn, pid, name=r.test_item_name)
+                items = P.list_test_items(self.conn, pid, name=r.test_item_name)
                 tid = next((it.id for it in items if it.level == r.level), None)
                 if tid is None:
                     QMessageBox.warning(
                         self, "导入失败",
-                        f"检测指标 {r.test_item_name}（{r.level}）不存在（项目 {r.project_name}）",
+                        f"检测指标 {r.test_item_name}（{r.level}）"
+                        f"不存在（项目 {r.project_name}），请先创建检测指标。",
                     )
                     return
                 ti_cache[key] = tid
-            rows_for_dup[len(ti_cache) and len(rows_for_dup)-1] is not None  # dummy
-        # 真正填 test_item_id
-        for i, r in enumerate(plan.ok_rows):
-            rows_for_dup[i]["test_item_id"] = ti_cache[(r.test_item_name, r.project_name, r.level)]
+            rows_for_dup.append({
+                "test_item_id": ti_cache[key],
+                "level": r.level,
+                "lot": r.lot,
+                "date": r.date,
+                "seq": r.seq,
+            })
 
         dups = M.find_duplicates_in_import(self.conn, rows_for_dup)
-        overwrite = False
-        if dups:
-            ans = QMessageBox.question(
-                self, "发现重复", f"发现 {len(dups)} 条重复，是否覆盖？",
-            )
-            if ans != QMessageBox.StandardButton.Yes:
-                return
-            overwrite = True
+        overwrite = dlg.overwrite_mode()
+        if dups and not overwrite:
+            QMessageBox.information(self, "导入", "用户取消（发现重复但未选覆盖）。")
+            return
 
         try:
             result = X.import_rows(
                 self.conn, plan,
                 project_resolver=project_resolver,
-                test_item_resolver=lambda name, pname, lvl: ti_cache.get((name, pname, lvl)),
                 overwrite=overwrite,
             )
         except X.ProjectNotFound as e:
@@ -522,13 +515,112 @@ class MainWindowB(QMainWindow):
         except X.TestItemNotFound as e:
             QMessageBox.warning(self, "导入失败", str(e))
             return
+        except M.DuplicateImportRows as e:
+            QMessageBox.warning(self, "导入失败", str(e))
+            return
+
         self.conn.commit()
         QMessageBox.information(
             self, "导入完成",
-            f"成功导入 {result['imported_count']} 条；跳过 {result['skipped_count']} 条。",
+            f"成功导入 {result['imported_count']} 条；\n"
+            f"跳过 {result['skipped_count']} 行（详见错误报告文件）。",
         )
         if self._current_test_item_id is not None:
             self._refresh_measurements(self._current_test_item_id)
+
+
+# ============================================================================
+# 导入预览对话框（支持导出错误报告）
+# ============================================================================
+
+class _ImportPreviewDialog(QDialog):
+    """导入预览：显示成功/跳过行统计，提供「导出错误报告」按钮和「确认/取消」按钮。"""
+
+    def __init__(self, parent, plan: X.ImportPlan):
+        super().__init__(parent)
+        self.setWindowTitle("导入预览")
+        self.resize(520, 300)
+        self._plan = plan
+        self._overwrite = False
+
+        layout = QVBoxLayout(self)
+
+        # 摘要
+        ok = len(plan.ok_rows)
+        skip = len(plan.skipped_rows)
+        summary = QLabel(
+            f"<b>成功 {ok} 行</b>，<b>跳过 {skip} 行</b>。"
+            if ok > 0 else
+            f"<b>成功 0 行</b>，跳过 {skip} 行。"
+        )
+        summary.setStyleSheet("font-size: 13px; padding: 6px;")
+        layout.addWidget(summary)
+
+        # 错误行列表（只显示前 20 条）
+        if plan.skipped_rows:
+            error_label = QLabel(f"跳过行（前 {min(20, skip)} 条）：")
+            error_label.setStyleSheet("font-weight: bold; color: #c0392b;")
+            layout.addWidget(error_label)
+
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            error_widget = QWidget()
+            err_layout = QVBoxLayout(error_widget)
+            for sr in sorted(plan.skipped_rows, key=lambda s: s.original_row_no)[:20]:
+                lbl = QLabel(sr.line_report())
+                lbl.setStyleSheet("color: #c0392b; font-family: monospace;")
+                err_layout.addWidget(lbl)
+            if skip > 20:
+                err_layout.addWidget(
+                    QLabel(f"  … 共 {skip} 行，已截断。")
+                )
+            scroll.setWidget(error_widget)
+            layout.addWidget(scroll, 1)
+        else:
+            layout.addWidget(QLabel("✅ 无跳过行，全部符合格式。"))
+
+        # 按钮行
+        btn_layout = QHBoxLayout()
+        self._overwrite_chk = QCheckBox("覆盖已有记录")
+        btn_layout.addWidget(self._overwrite_chk)
+
+        export_btn = QPushButton("导出错误报告…")
+        export_btn.clicked.connect(self._export_error_report)
+        btn_layout.addWidget(export_btn)
+
+        btn_layout.addStretch()
+        ok_btn = QPushButton("确认导入")
+        ok_btn.setDefault(True)
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(ok_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+    def overwrite_mode(self) -> bool:
+        return self._overwrite_chk.isChecked()
+
+    def _export_error_report(self):
+        """按要求 4：导出错误报告文件，用户照着行号改 Excel。"""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "保存错误报告",
+            f"import_errors_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            "Text Files (*.txt)",
+        )
+        if not path:
+            return
+        report_text = X.export_error_report(self._plan, save_to=path)
+        QMessageBox.information(
+            self, "导出成功",
+            f"错误报告已保存到：\n{path}\n\n"
+            f"用户照着行号修改 Excel 后，重新导入即可。",
+        )
+
+    @staticmethod
+    def _now_iso() -> str:
+        from datetime import datetime
+        return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
 
     # ----- 排查面板 -----
 

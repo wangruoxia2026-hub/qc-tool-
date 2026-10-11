@@ -28,6 +28,7 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Callable, Iterable, List, Optional, Sequence
 
 from openpyxl import Workbook
@@ -66,6 +67,49 @@ class SkippedRow:
     """被跳过的行 + 错误原因（写错误报告）"""
     original_row_no: int
     reason: str
+
+    def line_report(self) -> str:
+        """返回单行错误报告文本（用户友好格式）。"""
+        return f"  第 {self.original_row_no} 行：{self.reason}"
+
+
+def export_error_report(plan: ImportPlan, *, save_to: str | None = None) -> str:
+    """导出错误报告（spec §B.2 边界：错误报告要能导出成文件）。
+
+    把 plan.skipped_rows 转成用户可读的文本报告（行号 + 错误原因），
+    用户照着行号改完 Excel 再重新导入。
+
+    参数：
+        plan：parse_import_xlsx_bytes 的返回结果
+        save_to：若提供路径，则写入文件；否则只返回文本
+
+    返回：报告全文（str）
+
+    示例输出：
+        ==================== 导入错误报告 ====================
+        总览：成功 48 行，跳过 2 行
+
+        跳过的行：
+          第 3 行：日期格式错误
+          第 7 行：测定值非数字
+        ==================== 导入错误报告 ====================
+    """
+    lines: list[str] = [
+        "======================== 导入错误报告 ========================",
+        f"总览：成功 {len(plan.ok_rows)} 行，跳过 {len(plan.skipped_rows)} 行",
+        "",
+        "跳过的行：",
+    ]
+    if plan.skipped_rows:
+        for sr in sorted(plan.skipped_rows, key=lambda s: s.original_row_no):
+            lines.append(sr.line_report())
+    else:
+        lines.append("  （无跳过行）")
+    lines.append("=" * 60)
+    text = "\n".join(lines)
+    if save_to:
+        Path(save_to).write_text(text, encoding="utf-8")
+    return text
 
 
 @dataclass
@@ -429,4 +473,6 @@ __all__ = [
     "parse_import_xlsx_bytes",
     # 入库
     "import_rows",
+    # 错误报告导出
+    "export_error_report",
 ]

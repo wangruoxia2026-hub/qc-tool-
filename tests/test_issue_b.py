@@ -754,3 +754,324 @@ class TestExceptionSnapshots:
     ])
     def test_异常文案(self, cls, expected):
         assert expected in str(cls())
+
+
+# ============================================================================
+# Issue #3（功能 B 数据录入与 Excel 导入）—— 8 个核心场景
+# ============================================================================
+#
+# 设计要点（issue #3 顶部明确）：
+# - 判定触发逻辑由"公共入口函数 on_measurement_saved"承担，**直接调用**已
+#   锁死的第 7 章判定引擎（westgard.py），不重写判定。
+# - 8 个场景覆盖：1 / 2 / 3 / 6 / 7 / 8 / 9 / 10（场景 4 / 5 靠手测，不写自动化）
+# - 测试用 xlsx 由 openpyxl 临时生成 + tempfile 清理，不落盘
+# - 重点：场景 2 同日 H/L 两条 → 查库断言两条都是 2_2s
+# - 重点：场景 6 / 7 整批拒绝 → 查 DB 一条都没新增
+
+class TestIssue3Scenarios:
+    """Issue #3 8 个核心场景自动化（spec V1.3 §B + §D）"""
+
+    # ------------------------------------------------------------------
+    # 场景 1：录一条 104.1（+2SD ~ +3SD 间）→ 立即判警告 1_2s
+    # ------------------------------------------------------------------
+    def test_场景1_录104_1_立即警告1_2s(self, conn):
+        """issue #3 场景 1：保存那一刻立即判警告（黄色），不用等日终。"""
+        ids = _seed_basic(conn, target=100.0, sd=2.0)
+        m = M.create_measurement(
+            conn,
+            test_item_id=ids["test_item_id_l"],
+            project_id=ids["project_id"],
+            lot="LOT1", level="L",
+            date="2026-04-01", value=104.1,
+        )
+        # 立即可读（不靠"日终"）
+        assert m.status is not None and m.status.startswith("警告"), \
+            f"期望警告，实际 {m.status!r}"
+        rules = json.loads(m.rules)
+        assert "1_2s" in rules
+        assert "1_3s" not in rules
+
+    # ------------------------------------------------------------------
+    # 场景 2：同日 H 104.1 + L 104.2 → 两条都判 2_2s
+    # ------------------------------------------------------------------
+    def test_场景2_同日HL跨水平2_2s_查库两条都判2_2s(self, conn):
+        """issue #3 场景 2（重点）：
+        同一天录入 H 水平 104.1 和 L 水平 104.2 → 后保存的那条触发同日合并扫描，
+        两条都判失控（2_2s 跨水平）。查库断言：
+          - 两条 status 都是"失控(2_2s)"
+          - 两条 rules 包含 "2_2s"
+        """
+        ids = _seed_basic(conn, target=100.0, sd=2.0)
+        # 先存 L=104.2（+2.1SD）
+        M.create_measurement(
+            conn,
+            test_item_id=ids["test_item_id_l"],
+            project_id=ids["project_id"],
+            lot="LOT1", level="L",
+            date="2026-04-01", value=104.2,
+        )
+        # 再存 H=104.1（+2.05SD）→ 触发"后保存那条" 走合并扫描
+        M.create_measurement(
+            conn,
+            test_item_id=ids["test_item_id_h"],
+            project_id=ids["project_id"],
+            lot="LOT1", level="H",
+            date="2026-04-01", value=104.1,
+        )
+        conn.commit()
+
+        # 查 DB 终态：两条都应该是 2_2s 跨水平（场景 2 重点）
+        rows_l = M.list_measurements(conn, ids["test_item_id_l"], include_void=True)
+        rows_h = M.list_measurements(conn, ids["test_item_id_h"], include_void=True)
+        l_today = [r for r in rows_l if r.date == "2026-04-01"]
+        h_today = [r for r in rows_h if r.date == "2026-04-01"]
+        assert len(l_today) == 1, f"L 水平 4/1 应有 1 条，实际 {len(l_today)}"
+        assert len(h_today) == 1, f"H 水平 4/1 应有 1 条，实际 {len(h_today)}"
+
+        l_row = l_today[0]
+        h_row = h_today[0]
+        assert l_row.status is not None and l_row.status.startswith("失控"), \
+            f"L 水平 DB 终态期望失控，实际 {l_row.status!r}"
+        assert h_row.status is not None and h_row.status.startswith("失控"), \
+            f"H 水平 DB 终态期望失控，实际 {h_row.status!r}"
+        rules_l = json.loads(l_row.rules)
+        rules_h = json.loads(h_row.rules)
+        assert "2_2s" in rules_l, f"L 水平 rules 应含 2_2s，实际 {rules_l}"
+        assert "2_2s" in rules_h, f"H 水平 rules 应含 2_2s，实际 {rules_h}"
+
+    # ------------------------------------------------------------------
+    # 场景 3：补录历史日期 → 只扫补录日，不影响今天已录的数据
+    # ------------------------------------------------------------------
+    def test_场景3_补录昨天_只扫昨天_今天数据不受影响(self, conn):
+        """issue #3 场景 3：今天补录一条昨天的值，只扫昨天那个判定单元，
+        今天已录的数据 status 不变。"""
+        ids = _seed_basic(conn, target=100.0, sd=2.0)
+        # 今天 4/2 录一条在控
+        m_today = M.create_measurement(
+            conn,
+            test_item_id=ids["test_item_id_l"],
+            project_id=ids["project_id"],
+            lot="LOT1", level="L",
+            date="2026-04-02", value=100.0,
+        )
+        assert m_today.status == "在控"
+        # 补录昨天 4/1 一条 1_3s
+        m_yesterday = M.create_measurement(
+            conn,
+            test_item_id=ids["test_item_id_l"],
+            project_id=ids["project_id"],
+            lot="LOT1", level="L",
+            date="2026-04-01", value=107.0,
+        )
+        # 今天那条仍应是"在控"（补录昨天没把今天扫描掉）
+        refreshed_today = M.get_measurement(conn, m_today.id)
+        assert refreshed_today.status == "在控", \
+            f"补录昨天不应改变今天的状态，实际 {refreshed_today.status!r}"
+        # 昨天那条应是失控
+        assert m_yesterday.status is not None and m_yesterday.status.startswith("失控")
+
+    # ------------------------------------------------------------------
+    # 场景 6：缺"批号"列 → 整批拒绝（DB 0 新增 + 错误报告写明缺哪列）
+    # ------------------------------------------------------------------
+    def test_场景6_缺批号列_整批拒绝_DB零新增_错误报告写明(self, conn):
+        """issue #3 场景 6：模板缺"批号"列 → 整批拒绝，DB 一条都不入，
+        错误报告写明缺'批号'。"""
+        ids = _seed_basic(conn)
+        # 构造只有 5 列的"模板"（缺"批号"）
+        bad_xlsx = X.build_xlsx_with_columns(
+            ["项目名", "检测指标", "水平", "日期", "测定值"],  # 缺"批号"
+            [],
+        )
+        with pytest.raises(M.MissingRequiredColumns) as exc:
+            X.parse_import_xlsx_bytes(bad_xlsx)
+        assert "批号" in exc.value.columns, \
+            f"错误报告应写明缺'批号'，实际缺 {exc.value.columns}"
+
+        # 验证：DB 0 新增（因为 parse 阶段就拒，没走 import_rows）
+        n = conn.execute("SELECT COUNT(*) FROM measurements").fetchone()[0]
+        assert n == 0, f"整批拒绝后 DB 应 0 新增，实际 {n}"
+
+    # ------------------------------------------------------------------
+    # 场景 7：某行"检测指标"在系统里不存在 → 整批拒绝
+    # ------------------------------------------------------------------
+    def test_场景7_指标不存在_整批拒绝_DB零新增_错误报告指明(self, conn):
+        """issue #3 场景 7：Excel 里某行的'检测指标'在系统里不存在 →
+        整批拒绝，DB 0 新增，错误报告指明哪个指标不存在。"""
+        ids = _seed_basic(conn)  # 只建了 D2
+        rows = [
+            {  # 指标存在 D2
+                "项目名": "维生素 D", "检测指标": "D2",
+                "水平": "L", "批号": "LOT1", "日期": "2026-04-01",
+                "测定值": 100.0, "序号": 1,
+            },
+            {  # 指标不存在 D3
+                "项目名": "维生素 D", "检测指标": "D3_不存在的指标",
+                "水平": "L", "批号": "LOT1", "日期": "2026-04-01",
+                "测定值": 100.0, "序号": 2,
+            },
+        ]
+        xlsx = X.build_template_xlsx_with_rows(rows)
+        plan = X.parse_import_xlsx_bytes(xlsx)
+        # 2 行解析都 OK，import_rows 阶段才整批拒绝
+        assert len(plan.ok_rows) == 2
+
+        with pytest.raises(X.TestItemNotFound) as exc:
+            X.import_rows(
+                conn, plan,
+                project_resolver=lambda n: ids["project_id"] if n == "维生素 D" else None,
+            )
+        # 错误报告指明哪个指标不存在
+        assert "D3_不存在的指标" in str(exc.value)
+
+        # 验证：DB 0 新增（事务在 import_rows 入口抛异常前没 commit）
+        n = conn.execute("SELECT COUNT(*) FROM measurements").fetchone()[0]
+        assert n == 0, f"整批拒绝后 DB 应 0 新增，实际 {n}"
+
+    # ------------------------------------------------------------------
+    # 场景 8：某行日期格式错乱 → 该行跳过，其余正常导入
+    # ------------------------------------------------------------------
+    def test_场景8_某行日期错_该行跳过_错误报告给出行号(self, conn):
+        """issue #3 场景 8：Excel 某行日期格式错乱 → 该行跳过，其余正常
+        导入；错误报告给出出错行号。"""
+        ids = _seed_basic(conn)
+        rows = [
+            {"项目名": "维生素 D", "检测指标": "D2",
+             "水平": "L", "批号": "LOT1", "日期": "2026-04-01",
+             "测定值": 100.0, "序号": 1},  # OK
+            {"项目名": "维生素 D", "检测指标": "D2",
+             "水平": "L", "批号": "LOT1", "日期": "不是日期",  # 错
+             "测定值": 100.0, "序号": 2},
+            {"项目名": "维生素 D", "检测指标": "D2",
+             "水平": "L", "批号": "LOT1", "日期": "2026-04-03",
+             "测定值": 100.0, "序号": 3},  # OK
+        ]
+        xlsx = X.build_template_xlsx_with_rows(rows)
+        plan = X.parse_import_xlsx_bytes(xlsx)
+        # 1 行跳过，2 行 OK
+        assert any(s.original_row_no == 3 and "日期格式错误" in s.reason
+                   for s in plan.skipped_rows), \
+            f"期望第 3 行被跳过（日期错），实际 skipped={[(s.original_row_no, s.reason) for s in plan.skipped_rows]}"
+        assert len(plan.ok_rows) == 2
+
+        # 入库（去重后只剩 2 条）
+        X.import_rows(
+            conn, plan,
+            project_resolver=lambda n: ids["project_id"] if n == "维生素 D" else None,
+        )
+        rows_db = M.list_measurements(conn, ids["test_item_id_l"])
+        # 2 条入库（4/1 和 4/3）
+        dates = sorted(r.date for r in rows_db)
+        assert dates == ["2026-04-01", "2026-04-03"], \
+            f"应入库 2 条，实际 {dates}"
+
+    # ------------------------------------------------------------------
+    # 场景 9：编辑一条已保存记录的测定值 → 该判定单元重判
+    # ------------------------------------------------------------------
+    def test_场景9_编辑值_所属判定单元重判_旧结果作废(self, conn):
+        """issue #3 场景 9：编辑一条已保存记录的测定值 → 该条所属判定单元
+        重新判定，旧判定结果作废。"""
+        ids = _seed_basic(conn, target=100.0, sd=2.0)
+        m = M.create_measurement(
+            conn,
+            test_item_id=ids["test_item_id_l"],
+            project_id=ids["project_id"],
+            lot="LOT1", level="L",
+            date="2026-04-01", value=100.0,
+        )
+        assert m.status == "在控", f"初始应'在控'，实际 {m.status!r}"
+
+        # 编辑为 +3.5SD → 触发 1_3s
+        m2 = M.update_measurement_value(conn, m.id, value=107.0)
+        assert m2.status is not None and m2.status.startswith("失控"), \
+            f"编辑后应失控，实际 {m2.status!r}"
+        rules = json.loads(m2.rules)
+        assert "1_3s" in rules, f"编辑后应触发 1_3s，实际 {rules}"
+
+        # 再编辑回 100.0 → 重判回"在控"，旧"失控"判定作废
+        m3 = M.update_measurement_value(conn, m.id, value=100.0)
+        assert m3.status == "在控", \
+            f"再编辑回 100 应'在控'（旧失控结果作废），实际 {m3.status!r}"
+
+    # ------------------------------------------------------------------
+    # 场景 10：标记作废 → 不参与统计/判定/质控图
+    # ------------------------------------------------------------------
+    def test_场景10_标记作废_不参与统计判定质控图(self, conn):
+        """issue #3 场景 10：把一条记录标记作废 → status='作废'，
+        不参与统计、不参与判定扫描、不上质控图。"""
+        ids = _seed_basic(conn, target=100.0, sd=2.0)
+        m = M.create_measurement(
+            conn,
+            test_item_id=ids["test_item_id_l"],
+            project_id=ids["project_id"],
+            lot="LOT1", level="L",
+            date="2026-04-01", value=100.0,
+        )
+        M.mark_void(conn, m.id)
+        refreshed = M.get_measurement(conn, m.id)
+        assert refreshed.status == "作废"
+
+        # 1. 不参与统计：list_measurements(include_void=False) 不应包含
+        active = M.list_measurements(conn, ids["test_item_id_l"], include_void=False)
+        assert all(r.id != m.id for r in active), \
+            "作废行不应出现在 include_void=False 列表中"
+
+        # 2. 不参与判定扫描：再保存新数据触发 rescan，作废行 status 不变
+        M.create_measurement(
+            conn,
+            test_item_id=ids["test_item_id_l"],
+            project_id=ids["project_id"],
+            lot="LOT1", level="L",
+            date="2026-04-02", value=107.0,  # 触发 1_3s
+        )
+        after = M.get_measurement(conn, m.id)
+        assert after.status == "作废", \
+            f"rescan 不应覆盖作废行 status，实际 {after.status!r}"
+
+        # 3. 不上质控图：作废行的 rules 应清空（图形渲染时不画点）
+        assert after.rules is None or after.rules in (None, ""), \
+            f"作废行 rules 应清空，实际 {after.rules!r}"
+
+
+# ============================================================================
+# Issue #3 公共入口函数契约（on_measurement_saved）
+# ============================================================================
+
+class TestIssue3OnMeasurementSavedEntry:
+    """验证 on_measurement_saved 是 rescan_day_for_test_item 的公共别名，
+    且签名一致。"""
+
+    def test_on_measurement_saved与rescan是同一函数对象(self):
+        """issue #3 顶部要求'判定触发逻辑单独成函数（如 on_measurement_saved）'"""
+        from qc_tool.measurements import on_measurement_saved, rescan_day_for_test_item
+        assert on_measurement_saved is rescan_day_for_test_item
+
+    def test_on_measurement_saved可独立调用_触发重扫(self, conn):
+        """手动 INSERT 一条 + 调 on_measurement_saved → 应被判定/扫描。"""
+        ids = _seed_basic(conn, target=100.0, sd=2.0)
+        # 绕过 create_measurement，直接 SQL INSERT 一条 +4SD
+        conn.execute(
+            "INSERT INTO measurements(test_item_id, project_id, lot, level, date, value) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (ids["test_item_id_l"], ids["project_id"],
+             "LOT1", "L", "2026-04-01", 108.0),
+        )
+        conn.commit()
+        # 此时该行 status 是 NULL（未判定）
+        n = conn.execute(
+            "SELECT COUNT(*) FROM measurements WHERE status IS NULL"
+        ).fetchone()[0]
+        assert n == 1, f"直接 INSERT 后应为未判定，实际 {n}"
+
+        # 调 on_measurement_saved（公共入口）
+        from qc_tool.measurements import on_measurement_saved
+        on_measurement_saved(
+            conn, test_item_id=ids["test_item_id_l"], date="2026-04-01",
+        )
+        # 状态应被写为"失控"
+        row = conn.execute(
+            "SELECT status, rules FROM measurements "
+            "WHERE test_item_id = ? AND date = ?",
+            (ids["test_item_id_l"], "2026-04-01"),
+        ).fetchone()
+        assert row["status"] is not None and row["status"].startswith("失控"), \
+            f"on_measurement_saved 调用后应被判定为失控，实际 {row['status']!r}"

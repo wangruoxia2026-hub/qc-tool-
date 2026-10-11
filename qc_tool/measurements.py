@@ -605,6 +605,30 @@ def find_duplicates_in_import(
     return dup_indexes
 
 
+# ============================================================================
+# 公共入口：保存完一条 measurement 后该调这个函数
+# ============================================================================
+#
+# spec V1.3 §B.1 f："保存时立即合并扫描" — 调用方（手工录入 / Excel 导入 /
+# 第三方脚本）保存完一条 measurement 后必须立即调本函数，触发该 (test_item_id,
+# date) 组合的"保存时合并扫描"（跨水平规则 + 重算 status / rules）。
+#
+# 实现内部直接复用 rescan_day_for_test_item（同一份代码、零开销别名）。
+# 不重写、不分支——保证和 create_measurement / update_measurement_value 走的
+# 是同一份判定路径。
+#
+# 调用示例：
+#     from qc_tool.measurements import on_measurement_saved
+#     cur.execute("INSERT INTO measurements(...) VALUES (...)")
+#     on_measurement_saved(conn, test_item_id=..., date=...)
+#
+# 测试用：
+#     from qc_tool.measurements import on_measurement_saved
+#     on_measurement_saved(conn, test_item_id=1, date="2026-04-01")
+#
+on_measurement_saved = rescan_day_for_test_item
+
+
 __all__ = [
     # 异常
     "ValueMustNonNegative", "ValueInvalidNumber",
@@ -618,8 +642,8 @@ __all__ = [
     "create_measurement", "get_measurement",
     "list_measurements", "list_measurements_for_day",
     "update_measurement_value", "mark_void",
-    # 扫描
-    "rescan_day_for_test_item",
+    # 扫描（公共入口）
+    "on_measurement_saved", "rescan_day_for_test_item",
     # 导入查重
     "find_duplicates_in_import",
 ]

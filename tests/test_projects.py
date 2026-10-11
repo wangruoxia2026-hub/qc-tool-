@@ -381,15 +381,28 @@ class TestA3EditDelete:
 
     def test_删指标显示已删除(self, conn):
         """spec §8.3 d：test_item_id IS NULL → 前端显示'检测指标已删除'。
-        本层用 list_test_items 验证：item 不存在时返回 None。"""
+        本层用 list_test_items 验证：item 不存在时返回 None。
+
+        注意：seed 时**必须**先插 measurement 并让 ooc.measurement_id 关联到它，
+        否则 has_unexported_ooc 守卫会抛 HasUnexportedOOC（spec §A.3.2 边界）。
+        ooc.measurement_id 非空 = ooc 已脱钩 = 允许删除。
+        """
         _, ti = self._setup(conn)
+        # 先 seed measurement（绕过 stub），ooc 才能关联到它
+        conn.execute(
+            "INSERT INTO measurements(test_item_id, project_id, lot, level, date, value) "
+            "VALUES (?, 1, 'LOT1', 'L', '2026-04-01', 12.0)",
+            (ti.id,),
+        )
+        mid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         conn.execute(
             "INSERT INTO out_of_control("
-            "  test_item_id, project_id, lot, level, triggered_date,"
-            "  test_item_name, project_name, rules, conclusion"
-            ") VALUES (?, 1, 'LOT1', 'L', '2026-04-01', 'D2', '维生素 D',"
-            "  '[\"1_3s\"]', '复测合格')",
-            (ti.id,),
+            "  measurement_id, test_item_id, project_id,"
+            "  lot, level, triggered_date, test_item_name, project_name,"
+            "  rules, conclusion"
+            ") VALUES (?, ?, 1, 'LOT1', 'L', '2026-04-01',"
+            "  'D2', '维生素 D', '[\"1_3s\"]', '复测合格')",
+            (mid, ti.id),
         )
         conn.commit()
 
@@ -400,10 +413,9 @@ class TestA3EditDelete:
         row = conn.execute(
             "SELECT test_item_id, test_item_name FROM out_of_control"
         ).fetchone()
-        # test_item_id 没被自动置空（schema 没 FK），但 item 已不存在
-        # 上层查 get_test_item(row[0]) 会得到 None → 显示'已删除'并以 name 兜底
+        # test_item_id 已被 delete_test_item 手动 SET NULL（spec §8.3 c）
+        assert row[0] is None
         assert row[1] == "D2"
-        assert get_test_item(conn, row[0]) is None
 
 
 # ============================================================================

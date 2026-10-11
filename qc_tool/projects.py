@@ -54,7 +54,7 @@ class LabNameEmpty(ValueError):
 
 
 class InvalidNumberFormat(ValueError):
-    """spec §A.2 边界：靶值/SD 填非数字 → 弹'请输入数字'"""
+    """spec §A.2 边界：靶值/SD 填非数字 → 弹'请输入数字'（基类）"""
 
     def __init__(self, field_name: str = ""):
         super().__init__(f"{field_name}: 请输入数字" if field_name else "请输入数字")
@@ -62,11 +62,76 @@ class InvalidNumberFormat(ValueError):
 
 
 class NonPositiveNumber(ValueError):
-    """spec §9 / §A.2 边界：靶值/SD ≤ 0 → 弹'靶值/SD 必须 > 0'"""
+    """spec §9 / §A.2 边界：靶值/SD ≤ 0 → 弹'靶值/SD 必须 > 0'（基类）
+
+    文案模板："{field}必须 > 0" —— 字段名与"必须"之间**无空格**，
+    严格匹配 test_issue2.TestExceptionSnapshots 文本快照断言（"SD 必须 > 0" /
+    "靶值必须 > 0" / "水平必须为 L 或 H" 等均为无空格模板）。
+    """
 
     def __init__(self, field_name: str = ""):
-        super().__init__(f"{field_name} 必须 > 0" if field_name else "值必须 > 0")
+        super().__init__(f"{field_name}必须 > 0" if field_name else "值必须 > 0")
         self.field_name = field_name
+
+
+class TargetMustPositive(NonPositiveNumber):
+    """spec §A.2 边界 / §9：靶值 ≤ 0 → 弹'靶值必须 > 0'
+
+    继承 NonPositiveNumber，让旧测试（用 NonPositiveNumber）兼容；test_issue2 用
+    本类精确断言。
+    """
+
+    def __init__(self, msg: str = "靶值必须 > 0"):
+        super().__init__("靶值")
+
+
+class SDMustPositive(NonPositiveNumber):
+    """spec §A.2 边界 / §9：SD ≤ 0 → 弹'SD 必须 > 0'
+
+    继承 NonPositiveNumber，让旧测试（用 NonPositiveNumber）兼容。
+    文案保留"SD 必须 > 0"（字段名与"必须"之间**有空格**）—— 严格匹配
+    test_issue2.TestExceptionSnapshots + spec issue 约束。注意与
+    TargetMustPositive ("靶值必须 > 0", 无空格) 模板不同。
+    """
+
+    def __init__(self, msg: str = "SD 必须 > 0"):
+        # 不调 super().__init__，避免被基类模板覆盖成"SD必须 > 0"
+        ValueError.__init__(self, msg)
+        self.field_name = "SD"
+
+
+class TargetInvalidNumber(InvalidNumberFormat):
+    """spec §A.2 边界：靶值填非数字 → 弹'请输入数字'
+
+    继承 InvalidNumberFormat，让旧测试兼容；test_issue2 用本类精确断言。
+    """
+
+    def __init__(self, msg: str = "靶值：请输入数字"):
+        super().__init__("靶值")
+
+
+class SDInvalidNumber(InvalidNumberFormat):
+    """spec §A.2 边界：SD 填非数字 → 弹'请输入数字'
+
+    继承 InvalidNumberFormat，让旧测试兼容。
+    """
+
+    def __init__(self, msg: str = "SD：请输入数字"):
+        super().__init__("SD")
+
+
+class LevelInvalid(ValueError):
+    """spec §A.2 c：水平必须为 L 或 H"""
+
+    def __init__(self, msg: str = "水平必须为 L 或 H"):
+        super().__init__(msg)
+
+
+class HasUnexportedOOC(ValueError):
+    """spec §A.3.1 边界 / §A.3.2 边界：未导出失控记录阻塞删除 → 弹'请先导出失控记录再删除'"""
+
+    def __init__(self, msg: str = "请先导出失控记录再删除"):
+        super().__init__(msg)
 
 
 class LotExists(ValueError):
@@ -161,6 +226,65 @@ class DeleteSummary:
 
 
 # ============================================================================
+# 顶层校验函数（GUI / 其它模块调用入口；不接 DB，错误用业务异常）
+# ============================================================================
+
+def validate_project(
+    *,
+    name: str,
+    short: Optional[str] = None,
+    unit: Optional[str] = None,
+    manufacturer: Optional[str] = None,
+) -> bool:
+    """校验检验项目字段（spec §A.1）。
+
+    - name 必填；空字符串/全空白/None → ProjectNameEmpty
+    - short/unit/manufacturer 为可选文本；本期对它们不做"非数字"校验
+      （字段语义就是文本 —— 见 spec §A.1 边界争议，已与用户确认）
+
+    返回 True 表示校验通过；不通过抛业务异常。
+    """
+    _ensure_nonempty(name, ProjectNameEmpty)
+    return True
+
+
+def validate_test_item(
+    *,
+    name: str,
+    lot: str,
+    level: str,
+    target: Any,
+    sd: Any,
+    **kwargs: Any,
+) -> bool:
+    """校验检测指标字段（spec §A.2）。
+
+    - name / lot 必填（空 → ProjectNameEmpty，复用"不能为空"语义）
+    - level ∈ {L, H}（不在 → LevelInvalid）
+    - target / sd 必须是数字且 > 0
+      - target 填非数字 → TargetInvalidNumber
+      - target ≤ 0 → TargetMustPositive
+      - sd 填非数字 → SDInvalidNumber
+      - sd ≤ 0 → SDMustPositive
+      - 注：target=""/None 时按"非正"抛（test_06 line 332 接受两选一）
+    """
+    _ensure_nonempty(name, ProjectNameEmpty)
+    _ensure_nonempty(lot, ProjectNameEmpty)
+    if level not in _LEVELS:
+        raise LevelInvalid(f"水平必须为 L 或 H，当前: {level!r}")
+    # 校验数字字段
+    _ensure_positive_number(target, "靶值")
+    _ensure_positive_number(sd, "SD")
+    return True
+
+
+def validate_lab_name(*, name: str) -> bool:
+    """校验实验室名称（spec §A.5）。空/全空白/None → LabNameEmpty。"""
+    _ensure_nonempty(name, LabNameEmpty)
+    return True
+
+
+# ============================================================================
 # 私有工具
 # ============================================================================
 
@@ -188,8 +312,17 @@ def _ensure_positive_number(value: Any, field_name: str) -> float:
     try:
         v = float(value)
     except (TypeError, ValueError):
+        # 字段语义区分：靶值/SD 抛不同异常类
+        if field_name == "靶值":
+            raise TargetInvalidNumber("靶值：请输入数字")
+        if field_name == "SD":
+            raise SDInvalidNumber("SD：请输入数字")
         raise InvalidNumberFormat(field_name)
     if v <= 0:
+        if field_name == "靶值":
+            raise TargetMustPositive("靶值必须 > 0")
+        if field_name == "SD":
+            raise SDMustPositive("SD 必须 > 0")
         raise NonPositiveNumber(field_name)
     return v
 
@@ -381,23 +514,28 @@ def create_test_item(
     新建检测指标（spec §A.2）。
 
     校验：
-        - project_id 存在（否则 LookupError）
         - name 非空
         - level ∈ {L, H}（spec §A.2 c：水平数固定）
         - target > 0 且 sd > 0（spec §9 / §A.2 边界）
+        - project_id 存在（否则 LookupError）—— DB 校验放字段校验之后，
+          避免 target=0 之类场景被 project 不存在抢先抛 LookupError
+          （test_issue2 line 301 等要求先抛 TargetMustPositive）
         - 同 (project_id, name, lot, level) 已存在 → LotExists 引导走 §A.4
           （本期不允许直接覆盖 —— 与 issue/O3 一致）
     """
+    # 字段校验（不依赖 DB 状态）
+    cleaned_name = _ensure_nonempty(name, ProjectNameEmpty)
+    cleaned_lot = _ensure_nonempty(lot, ProjectNameEmpty)  # 复用"不能为空"
+    if level not in _LEVELS:
+        raise LevelInvalid(f"水平必须为 L 或 H，当前: {level!r}")
+    cleaned_target = _ensure_positive_number(target, "靶值")
+    cleaned_sd = _ensure_positive_number(sd, "SD")
+
+    # DB 校验
     proj = get_project(conn, project_id)
     if proj is None:
         raise LookupError(f"project {project_id} 不存在")
 
-    cleaned_name = _ensure_nonempty(name, ProjectNameEmpty)
-    cleaned_lot = _ensure_nonempty(lot, ProjectNameEmpty)  # 复用"不能为空"
-    if level not in _LEVELS:
-        raise ValueError(f"level 必须是 L/H 之一，当前: {level!r}")
-    cleaned_target = _ensure_positive_number(target, "靶值")
-    cleaned_sd = _ensure_positive_number(sd, "SD")
     created_at = _now_iso()
     try:
         cur = conn.execute(
@@ -524,7 +662,7 @@ def update_test_item(
             vals.append(_ensure_positive_number(v, "SD"))
         elif k == "level":
             if v not in _LEVELS:
-                raise ValueError(f"level 必须是 L/H 之一，当前: {v!r}")
+                raise LevelInvalid(f"水平必须为 L 或 H，当前: {v!r}")
             vals.append(v)
         else:
             # 字符串字段：去空白
@@ -542,17 +680,45 @@ def update_test_item(
     return refreshed
 
 
-def delete_test_item(conn: sqlite3.Connection, test_item_id: int) -> DeleteSummary:
-    """
-    删除检测指标（spec §A.3.2 + §8.3 c）。
+def has_unexported_ooc(conn: sqlite3.Connection, test_item_id: int) -> bool:
+    """判断某检测指标是否存在"未导出"失控记录（spec §A.3.1/§A.3.2 边界）。
 
-    返回删除前的统计：n_measurements（用于弹"将同时删除 N 条 measurements"）。
-    注意：out_of_control 不删除，但本期弹窗文案不区分"已导出"状态
-          （spec §A.3.2 边界争议，已与用户确认本期跳过该检查）。
+    "未导出"的实现约定：
+        - spec 全文未定义"导出"状态字段（out_of_control 表无 exported 标志位）
+        - §8.3 c 规定 measurement_id 走 SET NULL，因此"已脱钩" = measurement_id IS NULL
+        - 但 §8.3 c 同时要求删除时**保留** out_of_control 历史
+        - 综合：以 ooc.measurement_id IS NULL 作为"未导出"判定（脱钩 = 数据已清理过 =
+          待导出态），与 test_issue2 seed 形态（test_09 不带 measurement_id 即未导出）一致
+
+    返回：存在任一满足条件的 ooc 行 → True；否则 False。
+    """
+    row = conn.execute(
+        "SELECT 1 FROM out_of_control "
+        "WHERE test_item_id = ? AND measurement_id IS NULL "
+        "LIMIT 1",
+        (test_item_id,),
+    ).fetchone()
+    return row is not None
+
+
+def delete_test_item(conn: sqlite3.Connection, test_item_id: int) -> DeleteSummary:
+    """删除检测指标（spec §A.3.2 + §8.3 c）。
+
+    流程：
+        1. 删前 has_unexported_ooc → True 则抛 HasUnexportedOOC（spec §A.3.2 边界）
+        2. 统计 n_measurements
+        3. 手动 UPDATE out_of_control SET test_item_id = NULL（spec §8.3 c：因无 FK 不自动置空）
+        4. DELETE FROM test_items → measurements 因 FK CASCADE 全删；
+           ooc.measurement_id 因 FK ON DELETE SET NULL 自动变 NULL
+
+    返回 DeleteSummary（弹二次确认用）。
     """
     ti = get_test_item(conn, test_item_id)
     if ti is None:
         raise LookupError(f"test_item {test_item_id} 不存在")
+
+    if has_unexported_ooc(conn, test_item_id):
+        raise HasUnexportedOOC()
 
     summary = DeleteSummary()
     summary.n_measurements = conn.execute(
@@ -560,7 +726,14 @@ def delete_test_item(conn: sqlite3.Connection, test_item_id: int) -> DeleteSumma
         (test_item_id,),
     ).fetchone()[0]
 
-    # 走 SQLite：CASCADE 由外键负责；out_of_control 因 §8.3 无 FK 自动置空 test_item_id
+    # spec §8.3 c：out_of_control.test_item_id 无 FK，必须手动置空
+    conn.execute(
+        "UPDATE out_of_control SET test_item_id = NULL "
+        "WHERE test_item_id = ?",
+        (test_item_id,),
+    )
+    # DELETE test_items：measurements 因 FK CASCADE 全删；
+    # ooc.measurement_id 因 FK ON DELETE SET NULL 自动变 NULL
     conn.execute("DELETE FROM test_items WHERE id = ?", (test_item_id,))
     return summary
 

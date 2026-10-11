@@ -439,11 +439,11 @@ def test_test_items_list_with_target_sd(web_server):
 
 
 # ============================================================================
-# 14. Step 0（2026-10-11）：PUT/DELETE 路由框架占位
+# 14. Step 1（2026-10-11）：PUT/DELETE 路由已实现 → 改为 "404 unknown" 测试
 # ============================================================================
 
 def _http_raw(method: str, url: str, data: dict | None = None) -> tuple[int, dict]:
-    """Step 0 helper：支持 PUT/DELETE（与 _http 等价但允许 method=PUT/DELETE）。"""
+    """支持 PUT/DELETE/GET/POST 的最小 HTTP 客户端。"""
     body = json.dumps(data).encode("utf-8") if data is not None else b""
     req = urlreq.Request(
         url, data=body, method=method,
@@ -456,25 +456,16 @@ def _http_raw(method: str, url: str, data: dict | None = None) -> tuple[int, dic
         return e.code, json.loads(e.read()) if e.read else {}
 
 
-def test_put_returns_501_not_implemented(web_server):
-    """Step 0 验收 d：PUT 路由占位 → 返 501，不报错。"""
+def test_put_unknown_path_returns_404(web_server):
+    """Step 1 验收：PUT 已知端点已实现；未知路径仍返 404。"""
     base, _ = web_server
-    # 先建一个项目拿 id
-    _, body, _ = _http("POST", f"{base}/api/projects", data={"name": "PUT_Test"})
-    pid = json.loads(body)["id"]
-    # PUT 编辑项目
-    status, body = _http_raw(
-        "PUT", f"{base}/api/projects/{pid}",
-        data={"name": "PUT_Test_改"},
-    )
-    assert status == 501, f"PUT 应 501，实际 {status}: {body}"
-    assert "暂未实现" in body.get("error", "")
+    status, body = _http_raw("PUT", f"{base}/api/nonexistent/1",
+                             data={"name": "x"})
+    assert status == 404, f"未知路径应 404，实际 {status}"
 
 
-def test_delete_returns_501_not_implemented(web_server):
-    """Step 0 验收 d：DELETE 路由占位 → 返 501，不报错。"""
+def test_delete_unknown_path_returns_404(web_server):
+    """Step 1 验收：DELETE 已知端点已实现；未知路径仍返 404。"""
     base, _ = web_server
-    _, body, _ = _http("POST", f"{base}/api/projects", data={"name": "DEL_Test"})
-    pid = json.loads(body)["id"]
-    status, body = _http_raw("DELETE", f"{base}/api/projects/{pid}")
-    assert status == 501, f"DELETE 应 501，实际 {status}: {body}"
+    status, body = _http_raw("DELETE", f"{base}/api/nonexistent/1")
+    assert status == 404, f"未知路径应 404，实际 {status}"

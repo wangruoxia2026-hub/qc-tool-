@@ -36,6 +36,7 @@ from . import reports as R
 from . import statistics as S
 from . import investigation as I
 from . import backup
+from . import excel_io as X
 
 # ---------------------------------------------------------------------------
 # DB 管理（per-request 新连接，避免 sqlite 多线程问题）
@@ -244,6 +245,19 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
             # 状态（debug）
             if path == "/api/health":
                 _json_response(self, 200, {"ok": True, "db": str(db_path)})
+                return
+
+            # §B.3 下载模板
+            if path == "/api/template.xlsx":
+                xlsx = X.build_template_xlsx()
+                self.send_response(200)
+                self.send_header("Content-Type",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                self.send_header("Content-Length", str(len(xlsx)))
+                self.send_header("Content-Disposition",
+                                 'attachment; filename="qc_template.xlsx"')
+                self.end_headers()
+                self.wfile.write(xlsx)
                 return
 
             _json_error(self, 404, f"no route: {path}")
@@ -519,6 +533,12 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
         def _dispatch_post(self) -> None:
             url = urlparse(self.path)
             path = url.path
+
+            # §B.2 批量导入：用 raw bytes（xlsx），不走 JSON 解析
+            if path.startswith("/api/test_items/") and path.endswith("/import"):
+                self._post_import_xlsx()
+                return
+
             data = _read_json(self)
 
             # lab
@@ -616,31 +636,235 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, 200, m)
                 return
 
+            # §A.4 添加新批号
+            if path.startswith("/api/test_items/") and path.endswith("/lots"):
+                tid = int(path.split("/")[3])
+                try:
+                    new_ti = P.add_lot(
+                        self._db(), tid,
+                        new_lot=data.get("new_lot") or "",
+                        target=data.get("target"),
+                        sd=data.get("sd"),
+                        expiry_date=data.get("expiry_date"),
+                        operator=data.get("operator"),
+                        pre_processor=data.get("pre_processor"),
+                    )
+                    self._db().commit()
+                    _json_response(self, 200, new_ti)
+                except P.ProjectNameEmpty as e:
+                    _json_error(self, 400, str(e))
+                except P.NonPositiveNumber as e:
+                    _json_error(self, 400, str(e))
+                except P.TargetMustPositive as e:
+                    _json_error(self, 400, str(e))
+                except P.SDMustPositive as e:
+                    _json_error(self, 400, str(e))
+                except P.LotExists as e:
+                    _json_error(self, 400, str(e))
+                except LookupError as e:
+                    _json_error(self, 404, str(e))
+                return
+
             _json_error(self, 404, f"no route POST: {path}")
 
-        # ---- PUT / DELETE（Step 0 路由框架：返 501 占位，后续 Step 1+ 实现具体 handler）----
+        def _post_import_xlsx(self) -> None:
+            """§B.2 批量导入（spec V1.3 §B.2）。
+
+            POST /api/test_items/<tid>/import
+            Headers: X-Project-Name-Id = <project_id>
+            Body: xlsx 文件原始字节
+            """
+            url = urlparse(self.path)
+            path = url.path
+            tid = int(path.split("/")[3])
+            project_id_str = self.headers.get("X-Project-Name-Id", "").strip()
+            if not project_id_str:
+                _json_error(self, 400, "需要 X-Project-Name-Id header（项目 ID）")
+                return
+            try:
+                project_id = int(project_id_str)
+            except ValueError:
+                _json_error(self, 400, "X-Project-Name-Id 必须是整数")
+                return
+            proj = P.get_project(self._db(), project_id)
+            if proj is None:
+                _json_error(self, 400, f"项目 ID {project_id} 不存在")
+                return
+            project_name = proj.name
+
+            raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            try:
+                plan = X.parse_import_xlsx_bytes(raw)
+            except M.MissingRequiredColumns as e:
+                _json_error(self, 400, f"缺少必需列：{', '.join(e.columns)}")
+                return
+
+            for r in plan.ok_rows:
+                r.project_name = project_name
+
+            try:
+                def _project_resolver(name: str):
+                    if name == project_name:
+                        return project_id
+                    return None
+
+                def _ti_resolver(name: str, pname: str, level: str):
+                    row = self._db().execute(
+                        "SELECT t.id FROM test_items t "
+                        "JOIN projects p ON p.id = t.project_id "
+                        "WHERE p.name = ? AND t.name = ? AND t.level = ?",
+                        (pname, name, level),
+                    ).fetchone()
+                    return row["id"] if row else None
+
+                result = X.import_rows(
+                    self._db(), plan,
+                    project_resolver=_project_resolver,
+                    test_item_resolver=_ti_resolver,
+                )
+                self._db().commit()
+                # 把 plan.skipped_rows 也带上（spec §B.2 错误报告要写明行号）
+                result["skipped_rows"] = [
+                    {"original_row_no": s.original_row_no, "reason": s.reason}
+                    for s in plan.skipped_rows
+                ]
+                _json_response(self, 200, result)
+            except X.ProjectNotFound as e:
+                self._db().rollback()
+                _json_error(self, 400, str(e))
+            except X.TestItemNotFound as e:
+                self._db().rollback()
+                _json_error(self, 400, str(e))
+            except M.DuplicateImportRows as e:
+                self._db().rollback()
+                _json_error(self, 400, str(e))
+
+        # ---- PUT / DELETE（Step 0 路由框架 → Step 1 实现具体 handler）----
 
         def do_PUT(self) -> None:  # noqa: N802
             try:
-                self._dispatch_method_not_implemented("PUT")
+                self._dispatch_put()
             except Exception as e:
                 traceback.print_exc()
                 _json_error(self, 500, f"{type(e).__name__}: {e}")
 
         def do_DELETE(self) -> None:  # noqa: N802
             try:
-                self._dispatch_method_not_implemented("DELETE")
+                self._dispatch_delete()
             except Exception as e:
                 traceback.print_exc()
                 _json_error(self, 500, f"{type(e).__name__}: {e}")
 
-        def _dispatch_method_not_implemented(self, method: str) -> None:
-            """PUT/DELETE 路由占位。
+        def _dispatch_put(self) -> None:
+            """PUT 路由分发（spec §A.3.1 / §A.3.2 / §B.4）。"""
+            url = urlparse(self.path)
+            path = url.path
+            data = _read_json(self)
 
-            Step 0（2026-10-11）：spec V1.3 全 7 功能 web 化方向，PUT/DELETE
-            全部返 501 not_implemented。后续 Step 1+ 会在此方法中分发到
-            具体 handler（编辑项目/指标、添加批号、编辑值、标记作废、删除等）。
-            """
+            # 项目编辑
+            if path.startswith("/api/projects/") and path.count("/") == 3:
+                pid = int(path.split("/")[3])
+                try:
+                    kwargs = {k: data.get(k) for k in
+                              ("name", "short", "unit", "manufacturer")}
+                    p = P.update_project(self._db(), pid, **kwargs)
+                    self._db().commit()
+                    _json_response(self, 200, p)
+                except P.ProjectNameEmpty as e:
+                    _json_error(self, 400, str(e))
+                except P.ProjectNameExists as e:
+                    _json_error(self, 400, str(e))
+                except LookupError as e:
+                    _json_error(self, 404, str(e))
+                return
+
+            # 检测指标编辑
+            if path.startswith("/api/test_items/") and path.count("/") == 3:
+                tid = int(path.split("/")[3])
+                try:
+                    kwargs = {k: data.get(k) for k in
+                              ("short", "unit", "manufacturer", "lot", "level",
+                               "target", "sd", "expiry_date",
+                               "source", "operator", "pre_processor")}
+                    # 去掉 None 值，避免覆盖原值
+                    kwargs = {k: v for k, v in kwargs.items() if v is not None}
+                    ti = P.update_test_item(self._db(), tid, **kwargs)
+                    self._db().commit()
+                    _json_response(self, 200, ti)
+                except P.NonPositiveNumber as e:
+                    _json_error(self, 400, str(e))
+                except P.TargetMustPositive as e:
+                    _json_error(self, 400, str(e))
+                except P.SDMustPositive as e:
+                    _json_error(self, 400, str(e))
+                except P.LevelInvalid as e:
+                    _json_error(self, 400, str(e))
+                except LookupError as e:
+                    _json_error(self, 404, str(e))
+                return
+
+            # measurement 编辑值
+            if path.startswith("/api/measurements/") and path.count("/") == 3:
+                mid = int(path.split("/")[3])
+                if "value" not in data:
+                    _json_error(self, 400, "需要 value 字段")
+                    return
+                try:
+                    m = M.update_measurement_value(
+                        self._db(), mid, value=data["value"],
+                    )
+                    self._db().commit()
+                    _json_response(self, 200, m)
+                except M.ValueInvalidNumber as e:
+                    _json_error(self, 400, str(e))
+                except M.ValueMustNonNegative as e:
+                    _json_error(self, 400, str(e))
+                except LookupError as e:
+                    _json_error(self, 404, str(e))
+                return
+
+            _json_error(self, 404, f"no route PUT: {path}")
+
+        def _dispatch_delete(self) -> None:
+            """DELETE 路由分发（spec §A.3.1 / §A.3.2）。"""
+            url = urlparse(self.path)
+            path = url.path
+
+            # 项目删除
+            if path.startswith("/api/projects/") and path.count("/") == 3:
+                pid = int(path.split("/")[3])
+                try:
+                    summary = P.delete_project(self._db(), pid)
+                    self._db().commit()
+                    _json_response(self, 200, {
+                        "n_test_items": summary.n_test_items,
+                        "n_measurements": summary.n_measurements,
+                        "n_out_of_control": summary.n_out_of_control,
+                    })
+                except LookupError as e:
+                    _json_error(self, 404, str(e))
+                return
+
+            # 检测指标删除
+            if path.startswith("/api/test_items/") and path.count("/") == 3:
+                tid = int(path.split("/")[3])
+                try:
+                    summary = P.delete_test_item(self._db(), tid)
+                    self._db().commit()
+                    _json_response(self, 200, {
+                        "n_measurements": summary.n_measurements,
+                        "n_out_of_control": summary.n_out_of_control,
+                    })
+                except P.HasUnexportedOOC as e:
+                    _json_error(self, 400, str(e))
+                except LookupError as e:
+                    _json_error(self, 404, str(e))
+                return
+
+            _json_error(self, 404, f"no route DELETE: {path}")
+
+        def _dispatch_method_not_implemented(self, method: str) -> None:
+            """保留：未实现的具体方法返 501。"""
             url = urlparse(self.path)
             _json_error(
                 self, 501,

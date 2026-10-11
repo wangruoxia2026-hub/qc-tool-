@@ -23,12 +23,14 @@ Design (spec §E.1-E.2 + AGENTS.md iron rule 1 + §10 15-item scope):
 from __future__ import annotations
 
 import json
+import io
 import sqlite3
 from calendar import monthrange
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
-from typing import Any, Iterable, Optional, Sequence
+from pathlib import Path
+from typing import Any, Iterable, Optional, Sequence, Union
 
 import matplotlib
 
@@ -540,4 +542,44 @@ __all__ = [
     "compute_chart_data", "build_tooltip_text",
     # render
     "render_lj_chart",
+    # G.3: PNG export (spec V1.3 §G.3)
+    "save_png", "save_png_to_bytes",
 ]
+
+
+# ============================================================================
+# G.3 PNG 导出（spec V1.3 §G.3）
+# ============================================================================
+
+# 满足 spec G.3 + AGENTS.md §11：默认 DPI ≥ 300。
+# spec 没有硬性规定数值，但 G.2 b 规定 PDF "DPI ≥ 300"、G.3 沿用同一质量档。
+DEFAULT_PNG_DPI = 300
+
+
+def save_png(
+    fig: Figure,
+    path: Union[str, Path],
+    *,
+    dpi: int = DEFAULT_PNG_DPI,
+) -> Path:
+    """把当前 Levey-Jennings 质控图保存为 PNG 文件。
+
+    - 元信息是否显示由调用方在 render_lj_chart(meta=...) 时决定（spec G.3）。
+    - dpi 默认 300（与 PDF 矢量质量档一致；用户可自定义更小 dpi 减小文件大小）。
+
+    返回写入的 Path。
+    """
+    path = Path(path)
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    return path
+
+
+def save_png_to_bytes(
+    fig: Figure,
+    *,
+    dpi: int = DEFAULT_PNG_DPI,
+) -> bytes:
+    """save_png 的内存版本：返回 PNG bytes（用于测试 / 流式返回）。"""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=dpi, bbox_inches="tight")
+    return buf.getvalue()

@@ -435,7 +435,11 @@ class LJChartDialog(QDialog):
         if not path:
             return
         try:
-            self._current_figure.savefig(path, dpi=120, bbox_inches="tight")
+            # G.3: 默认 DPI=300；元信息由 _config_meta 决定（来自 ChartConfigDialog）
+            meta = getattr(self, "_config_meta", None) or self._build_meta()
+            fig = LJ.render_lj_chart(self._current_data, meta=meta) \
+                if self._current_data is not None else self._current_figure
+            LJ.save_png(fig, path)  # 默认 dpi=300
             QMessageBox.information(self, "Export", f"Saved to:\n{path}")
         except Exception as e:
             QMessageBox.warning(self, "Export failed", str(e))

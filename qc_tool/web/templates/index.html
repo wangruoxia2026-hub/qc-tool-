@@ -441,10 +441,95 @@ async function loadMeasurements() {
   for (const m of list) {
     const tr = document.createElement("tr");
     tr.className = rowClass(m);
+    tr.dataset.id = m.id;
+    tr.setAttribute("oncontextmenu", `showRowMenu(event, ${m.id}); return false;`);
     tr.innerHTML = `<td>${m.id}</td><td>${m.date}</td><td>${m.level}</td><td>${m.lot}</td>
       <td>${m.seq}</td><td class="value">${(m.value ?? 0).toFixed(3)}</td>
       <td class="status">${statusPill(m.status)}</td><td>${m.rules || "—"}</td>`;
     tbody.appendChild(tr);
+  }
+}
+
+// ============================================================================
+// spec §B.4 编辑 + 标记作废（右键菜单）
+// ============================================================================
+function showRowMenu(event, mid) {
+  // 关掉上次的菜单
+  document.querySelectorAll(".row-menu").forEach(el => el.remove());
+  const menu = document.createElement("div");
+  menu.className = "row-menu";
+  menu.style.cssText = `position:fixed;left:${event.clientX}px;top:${event.clientY}px;
+    background:white;border:1px solid #ccc;border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,0.2);
+    z-index:1000;padding:2px 0;font-size:13px;min-width:120px;`;
+  menu.innerHTML = `
+    <div class="row-menu-item" onclick="showEditMeasurementModal(${mid})"
+         style="padding:6px 14px;cursor:pointer;">编辑</div>
+    <div class="row-menu-item" onclick="voidMeasurement(${mid})"
+         style="padding:6px 14px;cursor:pointer;color:#c0392b;">标记作废</div>
+  `;
+  document.body.appendChild(menu);
+  // 点其他地方关菜单
+  setTimeout(() => {
+    document.addEventListener("click", function closeMenu() {
+      menu.remove();
+      document.removeEventListener("click", closeMenu);
+    }, { once: true });
+  }, 0);
+}
+
+function showEditMeasurementModal(mid) {
+  const m = state.measurements.find(x => x.id === mid);
+  if (!m) { toast("error", "找不到该记录"); return; }
+  if (m.status === "作废" || m.status === "Void") {
+    toast("error", "已作废的记录不可编辑"); return;
+  }
+  const html = `
+    <h3 style="margin:0 0 8px">编辑测量 #${mid}</h3>
+    <div style="display:grid;grid-template-columns:80px 1fr;gap:6px;align-items:center;font-size:13px">
+      <label>日期</label><input id="em-date" type="date" value="${m.date}">
+      <label>水平</label><select id="em-level"><option value="L" ${m.level==="L"?"selected":""}>L</option>
+        <option value="H" ${m.level==="H"?"selected":""}>H</option></select>
+      <label>批号</label><input id="em-lot" type="text" value="${escapeHtml(m.lot)}">
+      <label>序号</label><input id="em-seq" type="number" min="0" value="${m.seq}">
+      <label>测定值</label><input id="em-value" type="number" step="0.001" value="${m.value}">
+    </div>
+    <div class="form-actions" style="margin-top:12px">
+      <button onclick="saveEditMeasurement(${mid})">保存</button>
+      <button onclick="closeModal()">取消</button>
+    </div>
+  `;
+  showModal("编辑测量", html);
+}
+
+async function saveEditMeasurement(mid) {
+  const data = {
+    date: $("em-date").value,
+    level: $("em-level").value,
+    lot: $("em-lot").value.trim(),
+    seq: parseInt($("em-seq").value || "0"),
+    value: parseFloat($("em-value").value),
+  };
+  if (!data.date || isNaN(data.value)) {
+    toast("error", "日期和测定值必填"); return;
+  }
+  try {
+    await api("PUT", `/api/measurements/${mid}`, data);
+    toast("success", "已保存并重判");
+    closeModal();
+    await loadMeasurements();
+  } catch (e) {
+    toast("error", "保存失败: " + (e?.message || e));
+  }
+}
+
+async function voidMeasurement(mid) {
+  if (!confirm(`确认标记作废测量 #${mid}？\n此操作不可撤销，记录将不再参与判定。`)) return;
+  try {
+    await api("DELETE", `/api/measurements/${mid}`);
+    toast("success", "已标记作废");
+    await loadMeasurements();
+  } catch (e) {
+    toast("error", "作废失败: " + (e?.message || e));
   }
 }
 

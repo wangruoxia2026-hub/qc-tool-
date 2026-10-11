@@ -862,15 +862,17 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
                     _json_error(self, 404, str(e))
                 return
 
-            # measurement 编辑值
+            # measurement 编辑（spec §B.4 a：5 字段任选）
             if path.startswith("/api/measurements/") and path.count("/") == 3:
                 mid = int(path.split("/")[3])
-                if "value" not in data:
-                    _json_error(self, 400, "需要 value 字段")
-                    return
                 try:
-                    m = M.update_measurement_value(
-                        self._db(), mid, value=data["value"],
+                    m = M.update_measurement_fields(
+                        self._db(), mid,
+                        date=data.get("date"),
+                        level=data.get("level"),
+                        lot=data.get("lot"),
+                        seq=data.get("seq"),
+                        value=data.get("value"),
                     )
                     self._db().commit()
                     _json_response(self, 200, m)
@@ -880,6 +882,8 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
                     _json_error(self, 400, str(e))
                 except LookupError as e:
                     _json_error(self, 404, str(e))
+                except ValueError as e:
+                    _json_error(self, 400, str(e))
                 return
 
             _json_error(self, 404, f"no route PUT: {path}")
@@ -916,6 +920,17 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
                     })
                 except P.HasUnexportedOOC as e:
                     _json_error(self, 400, str(e))
+                except LookupError as e:
+                    _json_error(self, 404, str(e))
+                return
+
+            # measurement 标记作废（spec §B.4 d，幂等）
+            if path.startswith("/api/measurements/") and path.count("/") == 3:
+                mid = int(path.split("/")[3])
+                try:
+                    m = M.mark_void(self._db(), mid)
+                    self._db().commit()
+                    _json_response(self, 200, m)
                 except LookupError as e:
                     _json_error(self, 404, str(e))
                 return

@@ -326,6 +326,81 @@ def update_measurement_value(
     return Measurement.from_row(row)
 
 
+def update_measurement_fields(
+    conn: sqlite3.Connection,
+    mid: int,
+    *,
+    date: Optional[str] = None,
+    level: Optional[str] = None,
+    lot: Optional[str] = None,
+    seq: Optional[int] = None,
+    value: Optional[float] = None,
+    _skip_rescan: bool = False,
+) -> Measurement:
+    """spec §B.4 a — 编辑一条 measurement 的 5 字段（任意子集）+ 触发保存时合并扫描。
+
+    字段全部可选 — 调用方只传要改的字段。
+    改 date/level/lot/seq 后必须重扫：跨水平规则可能改变（spec §D.4 d/e）。
+    改 value 后也必须重扫（§D 整套规则）。
+    已作废记录不可编辑。
+    """
+    existing = get_measurement(conn, mid)
+    if existing is None:
+        raise LookupError(f"measurement {mid} 不存在")
+    if existing.status == "作废":
+        raise ValueError("已作废的记录不可编辑")
+
+    # 1) 字段校验（按需）
+    new_date = existing.date
+    if date is not None:
+        new_date = validate_measurement_date(date)["iso"]
+    new_level = existing.level
+    if level is not None:
+        if level not in ("L", "H"):
+            raise ValueError(f"level 必须为 'L' 或 'H'，实得 {level!r}")
+        new_level = level
+    new_lot = existing.lot
+    if lot is not None:
+        s = str(lot).strip()
+        if not s:
+            raise ValueError("lot 不能为空")
+        new_lot = s
+    new_seq = existing.seq
+    if seq is not None:
+        try:
+            new_seq = int(seq)
+        except (TypeError, ValueError):
+            raise ValueInvalidNumber("seq 必须为整数")
+        if new_seq < 0:
+            raise ValueMustNonNegative("seq 必须 ≥ 0")
+    new_value = existing.value
+    if value is not None:
+        new_value = validate_measurement_value(value)
+
+    # 2) 写回
+    conn.execute(
+        "UPDATE measurements SET date = ?, level = ?, lot = ?, seq = ?, value = ? "
+        "WHERE id = ?",
+        (new_date, new_level, new_lot, new_seq, new_value, mid),
+    )
+
+    # 3) 保存时合并扫描 — 用新 date（可能改了 date）
+    # 注意：spec §B.1 f — 仅扫该 (test_item_id, date)；如果旧日期也有同指标
+    # 数据，原本的判定可能仍正确，但保守起见扫新 date（变更日）。
+    if not _skip_rescan:
+        rescan_day_for_test_item(
+            conn, test_item_id=existing.test_item_id, date=new_date,
+        )
+        # 如果改了 date，**旧日期**的扫描结果也需重跑（因为同日扫描结果可能变）
+        if new_date != existing.date:
+            rescan_day_for_test_item(
+                conn, test_item_id=existing.test_item_id, date=existing.date,
+            )
+
+    row = conn.execute("SELECT * FROM measurements WHERE id = ?", (mid,)).fetchone()
+    return Measurement.from_row(row)
+
+
 def mark_void(conn: sqlite3.Connection, mid: int) -> Measurement:
     """标记作废：spec §B.4 d — status='作废'，不参与判定 / 不在质控图显示。"""
     existing = get_measurement(conn, mid)
@@ -641,7 +716,7 @@ __all__ = [
     # CRUD
     "create_measurement", "get_measurement",
     "list_measurements", "list_measurements_for_day",
-    "update_measurement_value", "mark_void",
+    "update_measurement_value", "update_measurement_fields", "mark_void",
     # 扫描（公共入口）
     "on_measurement_saved", "rescan_day_for_test_item",
     # 导入查重

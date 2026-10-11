@@ -1,7 +1,7 @@
 """
 §F.1 失控排查方向提示面板（spec V1.3 §F.1）
 
-按触发规则返回排查清单分类（随机误差嫌疑 / 系统误差嫌疑 / 双向嫌疑），
+按触发规则返回排查清单分类（随机误差嫌疑 / 系统误差嫌疑），
 UI 层（PyQt6）拿到后渲染成可勾选对话框。
 
 公开 API：
@@ -19,7 +19,14 @@ UI 层（PyQt6）拿到后渲染成可勾选对话框。
      在 measurements.rescan_day_for_test_item 已做；本函数只更新既有行的
      checklist / conclusion）
 
-不依赖 PyQt6。
+- list_ooc(conn, project_id=None, test_item_id=None, date_from=None, date_to=None)
+    查询 out_of_control 记录（issue #6 边界：删检测指标后能用冗余名称查历史）。
+    返回 list[dict]，每条含全部字段。
+    参数：
+      - project_id / test_item_id：可空；可单独使用或组合
+      - date_from / date_to：YYYY-MM-DD 字符串，可空；闭区间
+    返回 list[dict]（按 triggered_date DESC, id DESC 排序）。
+    注：不依赖 PyQt6。
 """
 from __future__ import annotations
 
@@ -49,18 +56,17 @@ _SYSTEM_ERROR_ITEMS: list[str] = [
     "耗材：批号更换 / 厂家变更",
 ]
 
-_RANDOM_SYSTEM_ITEMS: list[str] = [
-    "同时按'随机误差'和'系统误差'两个方向排查（详见上方两类）。",
-]
 
-
-# 规则 → 分类映射
+# 规则 → 分类映射（spec §F.1）
+# 2_2s 决议（issue #6）：同时按随机误差与系统误差两个方向排查，
+# 实现为把"随机误差嫌疑"+"系统误差嫌疑"两个分类都列出来，
+# 不再用单条提示文字的"双向嫌疑"分类。
 _RULE_CATEGORY_MAP: dict[str, list[str]] = {
     "1_3s": ["随机误差嫌疑"],
     "R_4s": ["随机误差嫌疑"],
     "4_1s": ["系统误差嫌疑"],
     "10_x": ["系统误差嫌疑"],
-    "2_2s": ["随机 + 系统双向嫌疑"],
+    "2_2s": ["随机误差嫌疑", "系统误差嫌疑"],
 }
 
 
@@ -95,7 +101,6 @@ def build_investigation_plan(
     cat_items: dict[str, list[str]] = {
         "随机误差嫌疑": _RANDOM_ERROR_ITEMS,
         "系统误差嫌疑": _SYSTEM_ERROR_ITEMS,
-        "随机 + 系统双向嫌疑": _RANDOM_SYSTEM_ITEMS,
     }
 
     plan_categories: list[dict[str, Any]] = []
@@ -165,7 +170,61 @@ def save_investigation(
     return int(row["id"])
 
 
+# ============================================================================
+# list_ooc：失控记录查询（spec §8.3 d + issue #6 边界）
+# ============================================================================
+
+# 出表全部列名（含两条冗余名称 test_item_name / project_name）
+_OOC_COLUMNS = (
+    "id, measurement_id, test_item_id, project_id,"
+    " lot, level, triggered_date, test_item_name, project_name,"
+    " rules, error_type, checklist, conclusion,"
+    " operator, reviewed_by, sample_batch, sample_no,"
+    " created_at"
+)
+
+
+def list_ooc(
+    conn: sqlite3.Connection,
+    *,
+    project_id: Optional[int] = None,
+    test_item_id: Optional[int] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+) -> list[dict]:
+    """查 out_of_control（issue #6 边界：删检测指标/项目后仍能查历史）。
+
+    实现约定：
+      - 任一过滤参数为 None → 该条件不参与 WHERE
+      - date_from / date_to 闭区间；二者均可单独 None
+      - 不依赖 PyQt6；纯 sqlite3.Row → dict
+
+    返回 list[dict]，按 triggered_date DESC, id DESC 排序。
+    """
+    clauses: list[str] = []
+    params: list[Any] = []
+    if project_id is not None:
+        clauses.append("project_id = ?")
+        params.append(project_id)
+    if test_item_id is not None:
+        clauses.append("test_item_id = ?")
+        params.append(test_item_id)
+    if date_from is not None:
+        clauses.append("triggered_date >= ?")
+        params.append(date_from)
+    if date_to is not None:
+        clauses.append("triggered_date <= ?")
+        params.append(date_to)
+
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    sql = f"SELECT {_OOC_COLUMNS} FROM out_of_control{where} " \
+          f"ORDER BY triggered_date DESC, id DESC"
+    rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
 __all__ = [
     "build_investigation_plan",
     "save_investigation",
+    "list_ooc",
 ]

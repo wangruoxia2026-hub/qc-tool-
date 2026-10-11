@@ -638,11 +638,33 @@ class TestPersistence:
 
 
 # ============================================================================
+# PyQt6 可用性探测 + QLabel 文本抓取（用于 §F.2 提示测试）
+# 必须在 TestF1Investigation 之前定义，否则 pytest 收集时类内引用不到。
+# ============================================================================
+
+def _pyqt6_available() -> bool:
+    try:
+        import PyQt6  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def _collect_all_label_text(widget) -> str:
+    """递归收集一个 QWidget 子树里所有 QLabel 的文本（含 HTML <br>）。"""
+    from PyQt6.QtWidgets import QLabel
+    parts = []
+    for lbl in widget.findChildren(QLabel):
+        parts.append(lbl.text())
+    return "\n".join(parts)
+
+
+# ============================================================================
 # §F.1 排查面板
 # ============================================================================
 
 class TestF1Investigation:
-    """spec §F.1 验收 a–e。"""
+    """spec §F.1 验收 a–i + §8.3 d 边界 + §F.2 4 条提示。"""
 
     def test_F1_随机误差_1_3s触发时_返回5项检查(self):
         plan = I.build_investigation_plan(
@@ -666,16 +688,27 @@ class TestF1Investigation:
         assert "系统误差嫌疑" in cats
 
     def test_F1_双向_2_2s(self):
+        """spec §F.1 h + issue #6 决议：2_2s 同时按两方向排查 →
+        面板拆为「随机误差嫌疑」5 项 +「系统误差嫌疑」6 项两个分类都列出。"""
         plan = I.build_investigation_plan(
             rules=["2_2s"], triggered_date="2026-04-01",
             project_name="维生素 D", test_item_name="D2",
             lot="LOT1", level="L", value=105.0,
         )
         cats = [c["category"] for c in plan["categories"]]
-        assert "随机 + 系统双向嫌疑" in cats
+        assert "随机误差嫌疑" in cats
+        assert "系统误差嫌疑" in cats
+        # 同时验证 5 + 6 项（issue #6 决议要求精确数字）
+        rand_items = next(c["items"] for c in plan["categories"]
+                         if c["category"] == "随机误差嫌疑")
+        sys_items = next(c["items"] for c in plan["categories"]
+                         if c["category"] == "系统误差嫌疑")
+        assert len(rand_items) == 5
+        assert len(sys_items) == 6
 
     def test_F1_多规则合并_1_3s加2_2s(self):
-        """spec §F.1 e：同时触发 1_3s + 2_2s → 面板同时展示随机误差 i-v + 双向嫌疑。"""
+        """spec §F.1 e + issue #6：同时触发 1_3s + 2_2s → 面板同时展示
+        随机误差 i-v（5 项）+ 系统误差 i-vi（6 项）合并 = 两类都出现。"""
         plan = I.build_investigation_plan(
             rules=["1_3s", "2_2s"], triggered_date="2026-04-01",
             project_name="维生素 D", test_item_name="D2",
@@ -683,7 +716,9 @@ class TestF1Investigation:
         )
         cats = [c["category"] for c in plan["categories"]]
         assert "随机误差嫌疑" in cats
-        assert "随机 + 系统双向嫌疑" in cats
+        assert "系统误差嫌疑" in cats
+        # issue #6 决议：不再使用单条提示文字的"双向嫌疑"分类
+        assert "随机 + 系统双向嫌疑" not in cats
 
     def test_F1_checklist持久化(self, conn):
         """勾选项写入 out_of_control.checklist（JSON 格式）。"""
@@ -716,6 +751,238 @@ class TestF1Investigation:
                 measurement_id=1, rules=["1_3s"],
                 checklist={}, conclusion="",
             )
+
+    # ------------------------------------------------------------------
+    # 以下为 issue #6 追加验收（spec §F.1 f–i、§8.3 d 边界、§10 不动范围）
+    # ------------------------------------------------------------------
+
+    # spec §F.1 f：1_3s / R_4s 展示随机误差嫌疑清单 5 项
+    def test_F1_随机误差清单_1_3s_5项(self):
+        plan = I.build_investigation_plan(
+            rules=["1_3s"], triggered_date="2026-04-01",
+            project_name="维生素 D", test_item_name="D2",
+            lot="LOT1", level="L", value=107.0,
+        )
+        rand = next(c for c in plan["categories"]
+                    if c["category"] == "随机误差嫌疑")
+        assert len(rand["items"]) == 5
+        # 关键 5 项（与 spec §F.1 原文一致）
+        joined = "\n".join(rand["items"])
+        assert "试剂" in joined
+        assert "仪器" in joined
+        assert "操作" in joined
+        assert "质控品" in joined
+        assert "加样/混匀/读数" in joined
+
+    def test_F1_随机误差清单_R_4s_5项(self):
+        """spec §F.1 f：R_4s 也按随机误差排查（同 1_3s）。"""
+        plan = I.build_investigation_plan(
+            rules=["R_4s"], triggered_date="2026-04-01",
+            project_name="维生素 D", test_item_name="D2",
+            lot="LOT1", level="L", value=105.0,
+        )
+        cats = [c["category"] for c in plan["categories"]]
+        assert "随机误差嫌疑" in cats
+        assert "系统误差嫌疑" not in cats  # R_4s 不带系统误差
+        rand = next(c for c in plan["categories"]
+                    if c["category"] == "随机误差嫌疑")
+        assert len(rand["items"]) == 5
+
+    # spec §F.1 g：4_1s / 10_x 展示系统误差嫌疑清单 6 项
+    def test_F1_系统误差清单_4_1s_6项(self):
+        plan = I.build_investigation_plan(
+            rules=["4_1s"], triggered_date="2026-04-01",
+            project_name="维生素 D", test_item_name="D2",
+            lot="LOT1", level="L", value=101.5,  # +0.75SD 不会触发 1_3s
+        )
+        cats = [c["category"] for c in plan["categories"]]
+        assert "系统误差嫌疑" in cats
+        assert "随机误差嫌疑" not in cats
+        sys = next(c for c in plan["categories"]
+                   if c["category"] == "系统误差嫌疑")
+        assert len(sys["items"]) == 6
+        joined = "\n".join(sys["items"])
+        # 关键 6 项（与 spec §F.1 原文一致）
+        assert "校准" in joined
+        assert "试剂" in joined
+        assert "质控品" in joined
+        assert "环境" in joined
+        assert "方法学偏倚" in joined
+        assert "耗材" in joined
+
+    def test_F1_系统误差清单_10_x_6项(self):
+        plan = I.build_investigation_plan(
+            rules=["10_x"], triggered_date="2026-04-01",
+            project_name="维生素 D", test_item_name="D2",
+            lot="LOT1", level="L", value=100.5,
+        )
+        sys = next(c for c in plan["categories"]
+                   if c["category"] == "系统误差嫌疑")
+        assert len(sys["items"]) == 6
+
+    # spec §F.1 e + h：1_3s + 2_2s 同时 → 5 + 6 项合并
+    def test_F1_合并_1_3s_加_2_2s_5_加_6项(self):
+        plan = I.build_investigation_plan(
+            rules=["1_3s", "2_2s"], triggered_date="2026-04-01",
+            project_name="维生素 D", test_item_name="D2",
+            lot="LOT1", level="L", value=107.0,
+        )
+        rand = next(c for c in plan["categories"]
+                    if c["category"] == "随机误差嫌疑")
+        sys = next(c for c in plan["categories"]
+                   if c["category"] == "系统误差嫌疑")
+        assert len(rand["items"]) == 5
+        assert len(sys["items"]) == 6
+
+    # spec §F.1 h：2_2s 单规则 → 5 + 6 都列出
+    def test_F1_2_2s_单规则_5_加_6项(self):
+        plan = I.build_investigation_plan(
+            rules=["2_2s"], triggered_date="2026-04-01",
+            project_name="维生素 D", test_item_name="D2",
+            lot="LOT1", level="L", value=105.0,
+        )
+        rand = next(c for c in plan["categories"]
+                    if c["category"] == "随机误差嫌疑")
+        sys = next(c for c in plan["categories"]
+                   if c["category"] == "系统误差嫌疑")
+        assert len(rand["items"]) == 5
+        assert len(sys["items"]) == 6
+
+    # spec §F.1 i（issue #6 验收 i）：§F.2 4 条提示在面板中可见
+    @pytest.mark.skipif(
+        not _pyqt6_available(), reason="PyQt6 未安装；§F.2 面板内嵌于 GUI，跳过"
+    )
+    def test_F2_4条提示展示在面板中(self):
+        """§F.2 4 条要点：不要立即抹点、不要只重做、不要厂商值、不要再纳入跨批。"""
+        pytest.importorskip("PyQt6")
+        from PyQt6.QtWidgets import QApplication
+        from qc_tool.main_window_b import InvestigationDialog
+
+        app = QApplication.instance() or QApplication([])
+        plan = I.build_investigation_plan(
+            rules=["1_3s"], triggered_date="2026-04-01",
+            project_name="维生素 D", test_item_name="D2",
+            lot="LOT1", level="L", value=107.0,
+        )
+        dlg = InvestigationDialog(None, plan=plan, measurement_id=999)
+        # 把所有 QLabel 文本拼起来
+        all_text = _collect_all_label_text(dlg)
+        # 4 条要点关键词
+        assert "立即抹去失控点" in all_text
+        assert "重做控制品" in all_text
+        assert "厂商定值" in all_text
+        assert "跨批规则判定" in all_text
+        dlg.deleteLater()
+
+    # spec §F.1 b/c + 边界：checklist 持久化 → 写库为 JSON 格式
+    def test_F1_checklist_JSON格式持久化_round_trip(self, conn):
+        ids = _seed_basic(conn)
+        m = M.create_measurement(
+            conn, test_item_id=ids["test_item_id_l"],
+            project_id=ids["project_id"],
+            lot="LOT1", level="L",
+            date="2026-04-01", value=107.0,
+        )
+        cl_in = {
+            "随机误差嫌疑_试剂：是否新开瓶 / 是否过期 / 是否污染": True,
+            "随机误差嫌疑_仪器：泵阀、管道气泡、光路、电压": False,
+        }
+        ooc_id = I.save_investigation(
+            conn, measurement_id=m.id, rules=["1_3s"],
+            checklist=cl_in, conclusion="已重新校准",
+        )
+        row = conn.execute(
+            "SELECT checklist, conclusion FROM out_of_control WHERE id = ?",
+            (ooc_id,),
+        ).fetchone()
+        cl_out = json.loads(row["checklist"])
+        assert cl_out == cl_in  # JSON round-trip 一致
+        assert row["conclusion"] == "已重新校准"
+
+    # 边界：list_ooc —— 删检测指标后仍能查历史
+    def test_F1_删指标后用_冗余名称_仍能查历史(self, conn):
+        ids = _seed_basic(conn)
+        m = M.create_measurement(
+            conn, test_item_id=ids["test_item_id_l"],
+            project_id=ids["project_id"],
+            lot="LOT1", level="L",
+            date="2026-04-01", value=107.0,
+        )
+        I.save_investigation(
+            conn, measurement_id=m.id, rules=["1_3s"],
+            checklist={"随机误差嫌疑_试剂：是否新开瓶 / 是否过期 / 是否污染": True},
+            conclusion="复测合格",
+        )
+        # 删指标（spec §8.3 c）
+        P.delete_test_item(conn, ids["test_item_id_l"])
+        # 此时 test_item_id 已置空、measurement_id 已置空
+        # 但 list_ooc 不带过滤应仍能查到（用冗余 test_item_name / project_name）
+        all_ooc = I.list_ooc(conn)
+        assert len(all_ooc) == 1
+        row = all_ooc[0]
+        assert row["test_item_id"] is None
+        assert row["measurement_id"] is None
+        assert row["test_item_name"] == "D2"           # 保留
+        assert row["project_name"] == "维生素 D"        # 保留
+        assert row["lot"] == "LOT1"
+        assert row["level"] == "L"
+        assert row["triggered_date"] == "2026-04-01"
+        assert row["conclusion"] == "复测合格"
+        assert "1_3s" in json.loads(row["rules"])
+
+    # 边界：list_ooc 按 project_id 过滤
+    def test_F1_list_ooc_按项目_过滤(self, conn):
+        ids1 = _seed_basic(conn, project="项目甲")
+        ids2 = _seed_basic(conn, project="项目乙")
+        m1 = M.create_measurement(
+            conn, test_item_id=ids1["test_item_id_l"],
+            project_id=ids1["project_id"],
+            lot="LOT1", level="L", date="2026-04-01", value=107.0,
+        )
+        m2 = M.create_measurement(
+            conn, test_item_id=ids2["test_item_id_l"],
+            project_id=ids2["project_id"],
+            lot="LOT1", level="L", date="2026-04-02", value=107.0,
+        )
+        I.save_investigation(conn, measurement_id=m1.id, rules=["1_3s"],
+                             checklist={"k": True})
+        I.save_investigation(conn, measurement_id=m2.id, rules=["1_3s"],
+                             checklist={"k": True})
+        rows_a = I.list_ooc(conn, project_id=ids1["project_id"])
+        rows_b = I.list_ooc(conn, project_id=ids2["project_id"])
+        assert len(rows_a) == 1 and rows_a[0]["project_name"] == "项目甲"
+        assert len(rows_b) == 1 and rows_b[0]["project_name"] == "项目乙"
+
+    # 边界：list_ooc 按日期区间过滤
+    def test_F1_list_ooc_按日期区间(self, conn):
+        ids = _seed_basic(conn)
+        for date_str in ("2026-04-01", "2026-04-15", "2026-05-01"):
+            m = M.create_measurement(
+                conn, test_item_id=ids["test_item_id_l"],
+                project_id=ids["project_id"],
+                lot="LOT1", level="L", date=date_str, value=107.0,
+            )
+            I.save_investigation(conn, measurement_id=m.id, rules=["1_3s"],
+                                 checklist={"k": True})
+        # 仅 4 月
+        rows = I.list_ooc(conn, date_from="2026-04-01", date_to="2026-04-30")
+        assert len(rows) == 2
+        assert all(r["triggered_date"].startswith("2026-04") for r in rows)
+
+    # 边界：list_ooc 排序 triggered_date DESC
+    def test_F1_list_ooc_排序(self, conn):
+        ids = _seed_basic(conn)
+        for date_str in ("2026-04-01", "2026-04-02", "2026-04-03"):
+            m = M.create_measurement(
+                conn, test_item_id=ids["test_item_id_l"],
+                project_id=ids["project_id"],
+                lot="LOT1", level="L", date=date_str, value=107.0,
+            )
+            I.save_investigation(conn, measurement_id=m.id, rules=["1_3s"],
+                                 checklist={"k": True})
+        rows = I.list_ooc(conn)
+        dates = [r["triggered_date"] for r in rows]
+        assert dates == sorted(dates, reverse=True)
 
 
 # ============================================================================

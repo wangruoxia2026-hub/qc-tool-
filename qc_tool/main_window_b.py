@@ -137,6 +137,22 @@ class InvestigationDialog(QDialog):
         info.setWordWrap(True)
         layout.addWidget(info)
 
+        # spec §F.2 失控后正确处理流程（issue #6 验收 i）
+        # 4 条要点：仅静态只读提示，不参与 checklist / 不写库
+        f2_tips = QLabel(
+            "<b>失控后处理提示（spec §F.2）：</b><br>"
+            "1. 不要立即抹去失控点<br>"
+            "2. 不要只用「重做控制品」来掩盖<br>"
+            "3. 不要将厂商定值与允许范围作为本实验室控制图的均值/SD<br>"
+            "4. 不要把以前已纠正的失控值再纳入跨批规则判定"
+        )
+        f2_tips.setWordWrap(True)
+        f2_tips.setStyleSheet(
+            "background-color: #fff7e6; border: 1px solid #f0c674;"
+            " padding: 6px; color: #6b4f00;"
+        )
+        layout.addWidget(f2_tips)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         body = QWidget()

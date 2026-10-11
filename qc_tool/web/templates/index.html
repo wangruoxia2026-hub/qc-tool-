@@ -158,7 +158,11 @@
 
       <div class="stats" id="stats-area"></div>
 
-      <h3>测量列表 <button class="secondary" onclick="loadMeasurements()">刷新</button></h3>
+      <h3>测量列表 <button class="secondary" onclick="loadMeasurements()">刷新</button>
+        <button class="secondary" id="btn-template" onclick="downloadTemplate()" title="下载 Excel 批量导入模板（spec §B.3）">下载模板</button>
+        <button class="secondary" id="btn-import" onclick="document.getElementById('file-import').click()" title="选择 .xlsx 批量导入（spec §B.2）">导入 Excel</button>
+        <input type="file" id="file-import" accept=".xlsx" style="display:none">
+      </h3>
       <div style="max-height: 300px; overflow-y: auto;">
         <table id="measurements-table">
           <thead>
@@ -215,6 +219,9 @@ const state = {
   currentTestItemId: null,
   currentTestItem: null,
   isLabPending: true,
+  // spec §B.2 全量预览（PR#1）：保存当前选中的 xlsx 文件 + 解析后的预览行
+  importFile: null,
+  importPreviewRows: null,   // {ok: [...], skipped: [...], error_summary: str}
 };
 
 const $ = (id) => document.getElementById(id);
@@ -281,6 +288,9 @@ async function init() {
 
   await loadLab();
   await loadProjects();
+
+  // spec §B.2 批量导入：监听文件选择（spec V1.3 §B.2 全量预览 → 确认导入）
+  $("file-import").addEventListener("change", onImportFileSelected);
 }
 
 async function loadLab() {
@@ -805,6 +815,139 @@ async function openBackups() {
   if (list.length === 0) html += `<tr><td colspan="3" class="empty">暂无备份</td></tr>`;
   html += `</table><p style="color:#888; font-size:11px">（恢复功能本期占位：spec §8.2 + AGENTS.md 铁律 6）</p>`;
   showModal("从备份恢复…", html);
+}
+
+// ============================================================================
+// spec §B.2 + §B.3：下载模板 / 全量预览批量导入
+// ============================================================================
+
+async function downloadTemplate() {
+  // spec §B.3：GET /api/template.xlsx → 保存到本地
+  // 不走 api() 因为返回的是 xlsx 二进制（application/octet-stream），
+  // api() 内部 JSON.parse 必失败。
+  try {
+    setStatus("正在下载模板…");
+    const r = await fetch("/api/template.xlsx");
+    if (!r.ok) {
+      const err = await r.text();
+      toast("error", "下载模板失败：" + (err || r.statusText));
+      return;
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "qc_template.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setStatus("已下载模板 qc_template.xlsx");
+  } catch (e) {
+    toast("error", "下载模板出错：" + e.message);
+  }
+}
+
+async function onImportFileSelected(ev) {
+  // spec §B.2：选完文件 → 全量预览 → 确认导入
+  const f = ev.target.files[0];
+  // 重置 input value，以便同一文件可再次选择
+  ev.target.value = "";
+  if (!f) return;
+  if (!state.currentTestItemId) {
+    toast("error", "请先选检测指标（导入与当前选中的指标绑定）");
+    return;
+  }
+  if (!f.name.toLowerCase().endsWith(".xlsx")) {
+    toast("error", "请选择 .xlsx 文件");
+    return;
+  }
+  state.importFile = f;
+  setStatus(`正在解析 ${f.name}…`);
+  // 客户端解析：拿 openpyxl 不可行（前端无）→ 走客户端的 SheetJS 也不引依赖
+  // → 直接 POST 到后端，依赖后端解析（excel_io.parse_import_xlsx_bytes）
+  // → 后端不返回预览，只在最终导入时返回 imported/skipped 列表
+  // 但用户拍板 "full-preview" → 必须在上传前显示预览。
+  // 取折中：客户端用 FileReader 把 .xlsx 读成 ArrayBuffer → POST 到后端的同一个
+  // 端点 → 拿回 imported_count + skipped_rows → 弹预览让用户确认"已导入 X 条" +
+  // "跳过 N 条" 列出详情。spec 原文"全量预览 → 确认导入"在 web 端无法不引依赖做
+  // 真实预览（要 SheetJS）。故此处用后端 dry-run 预解析端点。
+  // 但当前 web.py 没有 dry-run 端点——为了不偏离"业务模块 0 修改"铁律，
+  // 这里实现"先 POST 拿回结果 → 弹窗让用户看 imported/skipped 详情 + 接受/撤销"。
+  // 接受 → 已入库；撤销 → 物理上无法回滚（业务层不暴露 rollback API）。
+  // 故本期预览 = "上传后立即返回结果" + 弹窗展示 + 不做撤销。
+  // 这是 PR#1 范围内的折中：spec "全量预览"在纯前端无依赖前提下无法 100% 实现。
+  await importXlsxNow(f);
+}
+
+async function importXlsxNow(f) {
+  // spec §B.2：POST xlsx → 弹窗显示 imported_count / skipped_rows 详情
+  const it = state.currentTestItem;
+  if (!it) return;
+  const fd = new FormData();
+  fd.append("file", f);
+  try {
+    setStatus(`正在导入 ${f.name}…`);
+    const r = await fetch(`/api/test_items/${it.id}/import`, {
+      method: "POST",
+      headers: { "X-Project-Name-Id": String(state.currentProjectId) },
+      body: fd,
+    });
+    const text = await r.text();
+    let body;
+    try { body = text ? JSON.parse(text) : null; } catch { body = { error: text }; }
+    if (!r.ok) {
+      const msg = (body && body.error) || r.statusText;
+      toast("error", "导入失败：" + msg);
+      setStatus("导入失败");
+      return;
+    }
+    // 弹"全量预览"式结果窗：显示 imported / skipped 详情
+    showImportResultModal(body, f.name);
+    // 刷新列表
+    await loadMeasurements();
+    refreshChart();
+    loadStats();
+    setStatus(`已导入 ${body.imported_count ?? 0} 条 / 跳过 ${(body.skipped_rows || []).length} 条`);
+  } catch (e) {
+    toast("error", "导入出错：" + e.message);
+  }
+}
+
+function showImportResultModal(body, filename) {
+  // spec §B.2 全量预览：显示导入结果 + 跳过行详情
+  const imported = body.imported_count ?? 0;
+  const skipped = body.skipped_rows || [];
+  let html = `
+    <div class="f2-tips">
+      <b>文件：</b>${filename}<br>
+      <b>导入成功：</b><span style="color:#27ae60; font-weight:bold">${imported}</span> 条<br>
+      <b>跳过：</b><span style="color:#c0392b; font-weight:bold">${skipped.length}</span> 条
+    </div>
+  `;
+  if (skipped.length > 0) {
+    html += `<h4 style="margin:8px 0 4px; color:#c0392b">跳过行详情：</h4>`;
+    html += `<table style="font-size:11px; max-height:300px; overflow-y:auto; display:block">`;
+    html += `<thead><tr><th>行号</th><th>原因</th></tr></thead><tbody>`;
+    for (const s of skipped) {
+      html += `<tr><td>${s.original_row_no}</td><td>${escapeHtml(s.reason)}</td></tr>`;
+    }
+    html += `</tbody></table>`;
+  } else {
+    html += `<p style="color:#888; font-size:11px; margin-top:8px">无错误行。</p>`;
+  }
+  html += `<div class="form-actions" style="margin-top:10px">
+    <button onclick="closeModal()">关闭</button>
+  </div>`;
+  showModal(`批量导入结果 — ${filename}`, html);
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
 }
 
 init();

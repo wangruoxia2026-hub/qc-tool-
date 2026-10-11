@@ -1,0 +1,15 @@
+# 临床检验室内质控工具 —— 依赖（spec V1.3 §11）
+# 与 pyproject.toml / setup.cfg 未引入项目保持兼容；手动 pip install -r requirements.txt
+
+# 栈核心
+PyQt6>=6.5
+SQLAlchemy>=2.0  # 备用：本期不强制使用，原生 sqlite3 已可工作
+openpyxl>=3.1
+matplotlib>=3.7
+
+# 功能 G 新增（spec V1.3 §7.2 / §11 增补：失控记录 PDF 矢量导出）
+reportlab>=4.0
+
+# 测试
+pytest>=7.0
+pytest-qt>=4.2  # 备用：UI 测试可选

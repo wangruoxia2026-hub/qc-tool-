@@ -287,6 +287,22 @@ class MainWindowB(QMainWindow):
         chart_act.triggered.connect(_on_chart)
         menu.addAction(chart_act)
 
+        # Functional G (issue #7): Reports & Exports
+        from . import ui_reports
+        report_menu = self.menuBar().addMenu("报表")
+
+        act_monthly = QAction("生成月报…", self)
+        def _on_monthly():
+            ui_reports.run_monthly_report_export(self.conn, parent=self)
+        act_monthly.triggered.connect(_on_monthly)
+        report_menu.addAction(act_monthly)
+
+        act_ooc = QAction("失控记录导出…", self)
+        def _on_ooc():
+            ui_reports.run_ooc_export(self.conn, parent=self)
+        act_ooc.triggered.connect(_on_ooc)
+        report_menu.addAction(act_ooc)
+
     # ----- 刷新 -----
 
     def _refresh_projects(self):

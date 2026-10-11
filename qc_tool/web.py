@@ -539,6 +539,12 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
                 self._post_import_xlsx()
                 return
 
+            # §F.1 失控排查
+            if path.startswith("/api/ooc/") and path.endswith("/investigate"):
+                mid = int(path.split("/")[3])
+                self._post_save_investigation(mid)
+                return
+
             data = _read_json(self)
 
             # lab
@@ -666,6 +672,59 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
                 return
 
             _json_error(self, 404, f"no route POST: {path}")
+
+        def _post_save_investigation(self, mid: int) -> None:
+            """§F.1 失控排查写库。
+
+            POST /api/ooc/<mid>/investigate
+            Body: {items: [{category, item}, ...], conclusion?: str}
+            """
+            from qc_tool import investigation as IN
+
+            data = _read_json(self)
+            items = data.get("items") or []
+            conclusion = data.get("conclusion")
+            if not items:
+                _json_error(self, 400, "checklist 不能为空（spec §F.1 d）")
+                return
+            # 从 measurement 拿触发规则
+            row = self._db().execute(
+                "SELECT m.id, m.rules "
+                "FROM measurements m WHERE m.id = ?", (mid,),
+            ).fetchone()
+            if row is None:
+                _json_error(self, 404, f"measurement {mid} 不存在")
+                return
+            rules_str = row["rules"] or ""
+            rules_list = [r.strip() for r in rules_str.split(",") if r.strip()]
+            # checklist dict（spec §F.1 d 约定格式：{category: [item, ...]}）
+            # save_investigation 实际期望 {item: bool}，但 investigation.py
+            # 把整个 dict JSON 化保存，所以这里把 {cat: [items]} 当 checklist
+            # 存入（前端会原样回读做展示）
+            checklist: dict[str, list[str]] = {}
+            for it in items:
+                cat = it.get("category", "其他")
+                item = it.get("item", "")
+                if not item:
+                    continue
+                checklist.setdefault(cat, []).append(item)
+            try:
+                IN.save_investigation(
+                    self._db(),
+                    measurement_id=mid,
+                    rules=rules_list,
+                    checklist=checklist,
+                    conclusion=conclusion,
+                )
+                self._db().commit()
+                _json_response(self, 200, {"ok": True, "n_items": len(items)})
+            except LookupError as e:
+                _json_error(self, 404, str(e))
+            except ValueError as e:
+                _json_error(self, 400, str(e))
+            except Exception as e:
+                traceback.print_exc()
+                _json_error(self, 500, f"{type(e).__name__}: {e}")
 
         def _post_import_xlsx(self) -> None:
             """§B.2 批量导入（spec V1.3 §B.2）。

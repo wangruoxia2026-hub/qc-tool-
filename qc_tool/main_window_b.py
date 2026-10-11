@@ -278,6 +278,14 @@ class MainWindowB(QMainWindow):
                 QMessageBox.information(self, "功能建设中", str(e))
         act.triggered.connect(_on_restore)
         menu.addAction(act)
+        # Functional E (issue #5): Levey-Jennings chart
+        chart_act = QAction("质控图…", self)
+        def _on_chart():
+            from .ui_lj_chart import LJChartDialog
+            dlg = LJChartDialog(self.conn, parent=self)
+            dlg.show()
+        chart_act.triggered.connect(_on_chart)
+        menu.addAction(chart_act)
 
     # ----- 刷新 -----
 

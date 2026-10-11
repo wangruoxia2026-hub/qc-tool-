@@ -102,6 +102,18 @@ def _json_error(handler: BaseHTTPRequestHandler, status: int, message: str) -> N
 
 
 def _read_json(handler: BaseHTTPRequestHandler) -> dict:
+    """读 JSON body。
+
+    若 Content-Type 不是 application/json（如 multipart 上传走错路由），
+    返回空 dict —— 路由不会匹配，最终落到 404 而不是 500。
+    """
+    ct = (handler.headers.get("Content-Type") or "").lower()
+    if "json" not in ct:
+        # 仍消耗 body（HTTP 协议要求读完），但不解析
+        length = int(handler.headers.get("Content-Length", "0") or "0")
+        if length > 0:
+            handler.rfile.read(length)
+        return {}
     length = int(handler.headers.get("Content-Length", "0") or "0")
     if length == 0:
         return {}

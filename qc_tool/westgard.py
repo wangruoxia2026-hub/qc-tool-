@@ -265,6 +265,127 @@ def check_10_x_cross_level(
     return (low_all_pos and high_all_pos) or (low_all_neg and high_all_neg)
 
 
+def check_r_4s_same_level(
+    prev_value: float, cur_value: float, target: float, sd: float,
+) -> bool:
+    """
+    失控规则 R_4s（同水平线表现，用户 2026-10-13 裁定新增）：
+    同一测定日期同水平连续 2 条，一条超 +2SD 且另一条超 −2SD（正反两方向都算），
+    极差 >= 4SD → 触发（涉及的两条均失控）。
+    """
+    p = sd_score(prev_value, target, sd)
+    c = sd_score(cur_value, target, sd)
+    if not (is_exceeded(abs(p), THRESHOLD_2SD)
+            and is_exceeded(abs(c), THRESHOLD_2SD)):
+        return False
+    if (p > 0) == (c > 0):
+        return False  # 同方向不算
+    return is_reached(abs(p - c), THRESHOLD_4SD)
+
+
+def evaluate_day_by_seq(
+    low_by_seq: Dict[int, float], low_target: float, low_sd: float,
+    high_by_seq: Dict[int, float], high_target: float, high_sd: float,
+) -> Dict[str, Dict[int, List[str]]]:
+    """
+    按「同日期 + 同序号」配对判定跨水平规则（用户 2026-10-13 裁定）。
+
+    参数:
+        low_by_seq / high_by_seq: 同一测定日期各水平 seq → value
+        （另一水平同 seq 缺失 → 该 seq 不参与跨水平规则）
+
+    返回:
+        {"low": {seq: [规则...]}, "high": {seq: [规则...]}}
+        只包含触发跨水平规则的行：
+        - 2_2s ②: 同对两值同方向 > 2SD → 两条均 2_2s
+        - R_4s:   同对一超 +2SD 一超 −2SD 且极差 >= 4SD → 两条均 R_4s
+        - 4_1s ②: 相邻 seq 两对，每对两水平同方向 > 1SD → 4 个点均 4_1s
+        - 10_x ②: 相邻 seq 连续 5 对，每对两水平同侧 → 10 个点均 10_x
+    """
+    result: Dict[str, Dict[int, List[str]]] = {"low": {}, "high": {}}
+
+    def add(level: str, seq: int, rule: str) -> None:
+        bucket = result[level].setdefault(seq, [])
+        if rule not in bucket:
+            bucket.append(rule)
+
+    seqs = sorted(set(low_by_seq) & set(high_by_seq))
+    if not seqs:
+        return result
+
+    pair_scores: Dict[int, tuple[float, float]] = {
+        s: (sd_score(low_by_seq[s], low_target, low_sd),
+            sd_score(high_by_seq[s], high_target, high_sd))
+        for s in seqs
+    }
+
+    # 2_2s ② 与 R_4s（逐对，同日同序号）
+    for s in seqs:
+        ls, hs = pair_scores[s]
+        l_gt2 = is_exceeded(abs(ls), THRESHOLD_2SD)
+        h_gt2 = is_exceeded(abs(hs), THRESHOLD_2SD)
+        if l_gt2 and h_gt2 and (ls > 0) == (hs > 0):
+            add("low", s, "2_2s")
+            add("high", s, "2_2s")
+        if (l_gt2 and h_gt2 and (ls > 0) != (hs > 0)
+                and is_reached(abs(ls - hs), THRESHOLD_4SD)):
+            add("low", s, "R_4s")
+            add("high", s, "R_4s")
+
+    def pair_dir(s: int) -> int:
+        """同对两水平都同方向 > 1SD → 返回方向（+1/−1），否则 0"""
+        ls, hs = pair_scores[s]
+        if (is_exceeded(abs(ls), THRESHOLD_1SD)
+                and is_exceeded(abs(hs), THRESHOLD_1SD)):
+            if ls > 0 and hs > 0:
+                return 1
+            if ls < 0 and hs < 0:
+                return -1
+        return 0
+
+    # 4_1s ②: 相邻 seq 两对、两对方向一致（两水平各连续 2 次同方向）→ 4 个点均 4_1s
+    for i in range(1, len(seqs)):
+        s0, s1 = seqs[i - 1], seqs[i]
+        d0, d1 = pair_dir(s0), pair_dir(s1)
+        if s1 == s0 + 1 and d0 != 0 and d1 == d0:
+            for s in (s0, s1):
+                add("low", s, "4_1s")
+                add("high", s, "4_1s")
+
+    def pair_side(s: int) -> int:
+        """同对两水平同侧：都在靶值上 → +1，都在下 → −1，否则 0"""
+        ls, hs = pair_scores[s]
+        if ls > 0 and hs > 0:
+            return 1
+        if ls < 0 and hs < 0:
+            return -1
+        return 0
+
+    # 10_x ②: 相邻 seq 连续 5 对同侧（方向须一致）→ 10 个点均 10_x
+    run_side = 0
+    run_len = 0
+    for i, s in enumerate(seqs):
+        if i > 0 and s != seqs[i - 1] + 1:
+            run_side = 0
+            run_len = 0
+        side = pair_side(s)
+        if side != 0 and side == run_side:
+            run_len += 1
+        elif side != 0:
+            run_side = side
+            run_len = 1
+        else:
+            run_side = 0
+            run_len = 0
+        if run_len >= 5:
+            for j in range(i - 4, i + 1):
+                sj = seqs[j]
+                add("low", sj, "10_x")
+                add("high", sj, "10_x")
+
+    return result
+
+
 # ============== 综合判定入口 ==============
 
 def evaluate_measurement(

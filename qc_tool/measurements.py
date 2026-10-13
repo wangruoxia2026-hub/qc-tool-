@@ -437,14 +437,21 @@ def rescan_day_for_test_item(
     四维（spec §D.3）= 检测指标 + 批号 + 水平 + 日期；共享 (project_id, name)
     视为同一检测指标的不同水平。
 
+    规则按用户 2026-10-13 裁定的规则表执行（tests/test_rescan_seq_pair.py）：
+      - 同水平规则（1_2s / 1_3s / 2_2s① / 4_1s① / 10_x①）沿该水平自身值序列；
+        2_2s①（两条均失控）/ 4_1s①（第 4 条）/ 10_x①（第 10 条）保留跨日累计；
+      - R_4s 同水平线：同日相邻两条一超 +2SD 一超 −2SD 且极差 >= 4SD → 两条均失控；
+      - 跨水平规则（2_2s② / R_4s / 4_1s② / 10_x②）按「同日期 + 同序号」配对
+        （westgard.evaluate_day_by_seq），只标参与判定的点，不连坐当天其他行；
+      - 2_2s① 跨日对：早一天（或晚一天）那条一并回写补标。
+
     流程：
       1. 读 test_item（取 project_id/name/lot/target/sd/level）
       2. 找共享 (project_id, name, lot) 的所有 test_item（按 level 索引 target/sd）
-      3. 取当日所有水平的所有非作废 measurements
-      4. 对每个水平取"该水平在该日之前"的历史 values
-      5. 用 westgard.evaluate_day 处理跨水平规则（用各水平的 target/sd）
-      6. 用 westgard.evaluate_measurement 处理单水平规则（用各水平的 target/sd）
-      7. 写回 status / rules；触发失控的 → INSERT INTO out_of_control
+      3. 取当日所有水平的所有非作废 measurements（按 level, seq, id 排序）
+      4. 取各水平该日之前的历史（含 id，供跨日对回写）+ 该日之后第一条
+      5. 跨水平规则按「同日期 + 同序号」配对判定
+      6. 逐行写回 status / rules；触发失控的 → INSERT INTO out_of_control
     """
     # 1. 读 test_item
     ti_row = conn.execute(
@@ -470,7 +477,7 @@ def rescan_day_for_test_item(
     for r in sibling_rows:
         level_target_sd[r["level"]] = (int(r["id"]), float(r["target"]), float(r["sd"]))
 
-    # 3. 读当日所有非作废 measurements（所有水平）
+    # 3. 读当日所有非作废 measurements（所有水平，按 level, seq, id 排序）
     today_rows = conn.execute(
         "SELECT * FROM measurements "
         "WHERE test_item_id IN ({}) AND date = ? "
@@ -481,88 +488,123 @@ def rescan_day_for_test_item(
         tuple([tid for (tid, _, _) in level_target_sd.values()] + [date]),
     ).fetchall()
 
-    by_level: dict[str, list[sqlite3.Row]] = {lvl: [] for lvl in level_target_sd}
+    ordered_by_level: dict[str, list[sqlite3.Row]] = {lvl: [] for lvl in level_target_sd}
+    by_seq: dict[str, dict[int, sqlite3.Row]] = {lvl: {} for lvl in level_target_sd}
     for r in today_rows:
-        by_level[r["level"]].append(r)
+        ordered_by_level[r["level"]].append(r)
+        # 同 seq 多条时配对取最后一条（正常流程查重后不会出现，仅防御）
+        by_seq[r["level"]][r["seq"]] = r
 
-    # 4. 对每个水平取历史 values（"在该日之前"的非作废行）
-    history_by_level: dict[str, list[float]] = {lvl: [] for lvl in level_target_sd}
+    # 4. 各水平历史（该日之前）+ 该日之后第一条（跨日 2_2s① 对回写用）
+    history_by_level: dict[str, list[tuple[int, float]]] = {lvl: [] for lvl in level_target_sd}
+    next_first_by_level: dict[str, Optional[tuple[int, float]]] = {lvl: None for lvl in level_target_sd}
     for lvl, (tid, _t, _s) in level_target_sd.items():
         hist_rows = conn.execute(
-            "SELECT value FROM measurements "
+            "SELECT id, value FROM measurements "
             "WHERE test_item_id = ? AND date < ? "
             "AND (status IS NULL OR status != '作废') "
             "ORDER BY date, seq, id",
             (tid, date),
         ).fetchall()
-        history_by_level[lvl] = [float(r["value"]) for r in hist_rows]
+        history_by_level[lvl] = [(int(r["id"]), float(r["value"])) for r in hist_rows]
+        nx = conn.execute(
+            "SELECT id, value FROM measurements "
+            "WHERE test_item_id = ? AND date > ? "
+            "AND (status IS NULL OR status != '作废') "
+            "ORDER BY date, seq, id LIMIT 1",
+            (tid, date),
+        ).fetchone()
+        if nx is not None:
+            next_first_by_level[lvl] = (int(nx["id"]), float(nx["value"]))
 
-    # 5. 跨水平规则（evaluate_day）取当日各水平最后一条
-    last_value_by_level: dict[str, Optional[float]] = {}
-    for lvl in level_target_sd:
-        rows = by_level[lvl]
-        last_value_by_level[lvl] = float(rows[-1]["value"]) if rows else None
-
-    def _td(lvl: str) -> tuple[float, float]:
-        _, t, s = level_target_sd[lvl]
-        return t, s
-
-    has_any = (
-        any(last_value_by_level[lvl] is not None for lvl in level_target_sd)
-    )
-    if has_any:
-        # evaluate_day 需要 8 个位置参数（L/H 都给）
-        lt, ls = _td("L") if "L" in level_target_sd else (0.0, 1.0)
-        ht, hs = _td("H") if "H" in level_target_sd else (0.0, 1.0)
-        day_res = W.evaluate_day(
-            last_value_by_level.get("L"),
-            lt, ls,
-            last_value_by_level.get("H"),
-            ht, hs,
-            history_by_level.get("L", []),
-            history_by_level.get("H", []),
+    # 5. 跨水平规则：同日期 + 同序号配对
+    cross: dict[str, dict[int, list[str]]] = {"low": {}, "high": {}}
+    if "L" in by_seq and "H" in by_seq:
+        lt, ls = level_target_sd["L"][1], level_target_sd["L"][2]
+        ht, hs = level_target_sd["H"][1], level_target_sd["H"][2]
+        cross = W.evaluate_day_by_seq(
+            {s: float(r["value"]) for s, r in by_seq["L"].items()}, lt, ls,
+            {s: float(r["value"]) for s, r in by_seq["H"].items()}, ht, hs,
         )
-    else:
-        day_res = {
-            "low_status": W.Status.IN_CONTROL, "low_rules": [],
-            "high_status": W.Status.IN_CONTROL, "high_rules": [],
-        }
 
-    # 6. 写回当日每条 measurement 的 status / rules
+    # 6. 逐水平逐行判定 + 写回
     rows_updated = 0
     ooc_inserted = 0
-    for lvl in level_target_sd:
-        # 该水平在 evaluate_day 中的跨水平规则结果
+    agg: dict[str, dict] = {
+        lvl: {"rules": set(), "status": W.Status.IN_CONTROL} for lvl in level_target_sd
+    }
+    for lvl, (tid, target, sd) in level_target_sd.items():
+        rows = ordered_by_level[lvl]
         day_key = "low" if lvl == "L" else "high"
-        day_rules = day_res.get(f"{day_key}_rules", [])
-        day_status_enum = day_res.get(f"{day_key}_status", W.Status.IN_CONTROL)
+        cross_for_level = cross.get(day_key, {})
+        full_hist = [v for (_i, v) in history_by_level[lvl]]
 
-        tid, target, sd = level_target_sd[lvl]
-        same_level_before = list(history_by_level[lvl])
-        for r in by_level[lvl]:
-            # 单条判定：用"该水平在该日之前的全部历史 + 当日该水平的之前 seq"
-            history_for_this = list(same_level_before)
-            res = W.evaluate_measurement(
-                value=float(r["value"]),
-                target=target, sd=sd,
-                history=history_for_this,
-            )
-            # 把"该水平当日之前的 measurement"也并入 history（顺序追加）
-            same_level_before.append(float(r["value"]))
+        # 6.1 同水平完整序列（历史最后一条 → 当日 → 该日之后第一条）做 2_2s① 配对：
+        #     两条同方向 > 2SD → 两条均失控（含跨日对的回写）
+        chain: list[tuple[str, int, float]] = []
+        if history_by_level[lvl]:
+            hid, hval = history_by_level[lvl][-1]
+            chain.append(("hist", hid, hval))
+        for i, r in enumerate(rows):
+            chain.append(("day", i, float(r["value"])))
+        if next_first_by_level[lvl] is not None:
+            nid, nval = next_first_by_level[lvl]
+            chain.append(("next", nid, nval))
 
-            # 跨水平规则也并入（去重）
-            merged_rules = sorted(set(res["rules"]) | set(day_rules))
-            merged_status = (
-                W.Status.OUT_OF_CONTROL if (
-                    res["status"] == W.Status.OUT_OF_CONTROL or
-                    day_status_enum == W.Status.OUT_OF_CONTROL
-                ) else (
-                    W.Status.WARNING if (
-                        res["status"] == W.Status.WARNING or
-                        day_status_enum == W.Status.WARNING
-                    ) else W.Status.IN_CONTROL
-                )
-            )
+        pair_flags = [False] * len(rows)
+        retro_ids: set[int] = set()
+        for a, b in zip(chain, chain[1:]):
+            if W.check_2_2s([a[2], b[2]], target, sd):
+                for node in (a, b):
+                    if node[0] == "day":
+                        pair_flags[node[1]] = True
+                    else:
+                        retro_ids.add(node[1])
+
+        # 6.2 R_4s 同水平线：仅同日相邻两条（一正一负 + 极差 >= 4SD）→ 两条均失控
+        r4s_flags = [False] * len(rows)
+        for i in range(1, len(rows)):
+            if W.check_r_4s_same_level(
+                float(rows[i - 1]["value"]), float(rows[i]["value"]), target, sd,
+            ):
+                r4s_flags[i - 1] = True
+                r4s_flags[i] = True
+
+        # 6.3 每个 seq 当日最后一条（跨水平规则只挂到参与配对的这一条）
+        last_idx_for_seq: dict[int, int] = {}
+        for i, r in enumerate(rows):
+            last_idx_for_seq[int(r["seq"])] = i
+
+        # 6.4 逐行判定写回
+        same_level_before: list[float] = list(full_hist)
+        for i, r in enumerate(rows):
+            value = float(r["value"])
+            row_rules: list[str] = []
+            if W.check_1_2s(value, target, sd):
+                row_rules.append("1_2s")
+            if W.check_1_3s(value, target, sd):
+                row_rules.append("1_3s")
+            if pair_flags[i]:
+                row_rules.append("2_2s")
+            if r4s_flags[i]:
+                row_rules.append("R_4s")
+            full = list(same_level_before)
+            if W.check_4_1s(full + [value], target, sd):
+                row_rules.append("4_1s")
+            if W.check_10_x(full + [value], target, sd):
+                row_rules.append("10_x")
+            if last_idx_for_seq.get(int(r["seq"])) == i:
+                row_rules.extend(cross_for_level.get(int(r["seq"]), []))
+            same_level_before.append(value)
+
+            merged_rules = sorted(set(row_rules))
+            if any(x in W.OUT_OF_CONTROL_RULES for x in merged_rules):
+                merged_status = W.Status.OUT_OF_CONTROL
+            elif merged_rules:
+                merged_status = W.Status.WARNING
+            else:
+                merged_status = W.Status.IN_CONTROL
+
             # 在控时 rules 写 NULL（不存空数组）；警告/失控时存 JSON
             if merged_status == W.Status.IN_CONTROL:
                 rules_str = None
@@ -575,8 +617,9 @@ def rescan_day_for_test_item(
             )
             rows_updated += 1
 
-            # 7. 触发失控的 → INSERT INTO out_of_control
+            agg[lvl]["rules"] |= set(merged_rules)
             if merged_status == W.Status.OUT_OF_CONTROL:
+                agg[lvl]["status"] = W.Status.OUT_OF_CONTROL
                 ooc_inserted += _insert_out_of_control_if_new(
                     conn,
                     measurement_id=int(r["id"]),
@@ -589,15 +632,73 @@ def rescan_day_for_test_item(
                     project_name=project_name,
                     rules=merged_rules,
                 )
+            elif merged_status == W.Status.WARNING and \
+                    agg[lvl]["status"] == W.Status.IN_CONTROL:
+                agg[lvl]["status"] = W.Status.WARNING
 
-    return {
+        # 6.5 跨日 2_2s① 对回写（只增不减；该行自己那天的 rescan 会全量重算）
+        for mid in sorted(retro_ids):
+            ooc_inserted += _retro_add_2_2s(
+                conn, mid, project_name=project_name, test_item_name=test_item_name,
+            )
+            rows_updated += 1
+
+    # 7. 汇总（兼容旧返回结构：low/high 为各水平当日全部触发的规则并集 + 最差状态）
+    result: dict[str, Any] = {
         "rows_updated": rows_updated,
         "ooc_inserted": ooc_inserted,
-        "low_status": day_res["low_status"],
-        "high_status": day_res["high_status"],
-        "low_rules": day_res["low_rules"],
-        "high_rules": day_res["high_rules"],
     }
+    for lvl in level_target_sd:
+        key = "low" if lvl == "L" else "high"
+        result[f"{key}_status"] = agg[lvl]["status"]
+        result[f"{key}_rules"] = sorted(agg[lvl]["rules"])
+    return result
+
+
+def _retro_add_2_2s(
+    conn: sqlite3.Connection,
+    measurement_id: int,
+    *,
+    project_name: str,
+    test_item_name: str,
+) -> int:
+    """2_2s① 跨日对回写：给非当日那条合并 2_2s 规则并更新状态 / 补 OOC 记录。
+
+    只增不减：该行自己那天的 rescan 会全量重算它自己的规则。
+    """
+    row = conn.execute(
+        "SELECT * FROM measurements WHERE id = ?", (measurement_id,),
+    ).fetchone()
+    if row is None or row["status"] == "作废":
+        return 0
+    rules = json.loads(row["rules"]) if row["rules"] else []
+    if "2_2s" in rules:
+        return 0
+    rules = sorted(set(rules) | {"2_2s"})
+    if any(x in W.OUT_OF_CONTROL_RULES for x in rules):
+        status = W.Status.OUT_OF_CONTROL
+    elif rules:
+        status = W.Status.WARNING
+    else:
+        status = W.Status.IN_CONTROL
+    conn.execute(
+        "UPDATE measurements SET status = ?, rules = ? WHERE id = ?",
+        (_status_text(status, rules), json.dumps(rules, ensure_ascii=False), measurement_id),
+    )
+    if status == W.Status.OUT_OF_CONTROL:
+        return _insert_out_of_control_if_new(
+            conn,
+            measurement_id=measurement_id,
+            test_item_id=row["test_item_id"],
+            project_id=row["project_id"],
+            lot=row["lot"],
+            level=row["level"],
+            triggered_date=row["date"],
+            test_item_name=test_item_name,
+            project_name=project_name,
+            rules=rules,
+        )
+    return 0
 
 
 def _insert_out_of_control_if_new(

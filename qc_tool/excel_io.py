@@ -438,6 +438,7 @@ def import_rows(
             lot=r.lot, level=r.level,
             date=r.date,
             value=r.value,
+            seq=r.seq,
             _skip_rescan=True,
         )
         rescan_keys.add((tid, r.date))

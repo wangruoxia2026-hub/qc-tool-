@@ -3,6 +3,13 @@ Issue #3（功能 C：统计量自动计算）—— 测试先行
 
 覆盖 spec §C.1–C.3 全部验收标准 a–g + §9 边界 + §C.2 独立性验证。
 
+2026-10-13 用户裁定（见 spec 附录 B.5）：
+- 统计区两栏始终按数据实算，不受 test_items.source（固定/累计）影响；
+  source 只用于新建指标时确定靶值/SD。
+- 本月统计 = 本月内全部数据（只刨作废，含失控/警告点）。
+- 累计统计 = 第一条质控数据日期 ~ 上一自然月最后一天，
+  刨除失控点（警告点保留），N/均值/SD/CV% 全算。
+
 运行：
     python -m pytest tests/test_issue3_stats.py -v
 """
@@ -158,75 +165,53 @@ class TestStatsPure:
 
 
 # ============================================================================
-# §C.1 b + §C.1 d：source='固定' 时统计区只显示靶值/SD/CV%
+# 2026-10-13 裁定：统计区始终按数据实算，source 模式不影响统计区
 # ============================================================================
 
-class TestSourceFixed:
-    """source='固定'：统计区只显示录入的靶值与 SD 和 CV%"""
+class TestSourceIgnored:
+    """source 固定/累计 不再影响统计区：两栏都按数据实算。"""
 
-    def test_fixed_shows_target_and_sd(self, fresh_db):
-        """source='固定' → 统计区显示手填靶值/SD，不走历史计算。"""
-        ids = _seed_full(fresh_db, target=100.0, sd=2.0)
-        view = S.get_statistics_view(
-            fresh_db,
-            test_item_id=ids["test_item_id_l"],
-            lot="LOT1", level="L",
-            source="固定",
-            today=date(2026, 4, 15),
-        )
-        # 固定模式：无论库里有多少数据，mean/sd 都显示手填值
-        assert view["month"].mean == 100.0
-        assert view["month"].sd == 2.0
-        assert view["month"].cv_pct == 2.0  # 2/100*100
-
-    def test_fixed_cumulative_also_target(self, fresh_db):
-        """source='固定' → 累计统计也显示靶值（不受历史数据影响）。"""
-        ids = _seed_full(fresh_db, target=100.0, sd=2.0)
-        # 录一些数据
-        _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
-                    project_id=ids["project_id"],
-                    date="2026-03-15", value=110.0)
-        view = S.get_statistics_view(
-            fresh_db,
-            test_item_id=ids["test_item_id_l"],
-            lot="LOT1", level="L",
-            source="固定",
-            today=date(2026, 4, 15),
-        )
-        # 累计栏也显示手填值，不受 110.0 影响
-        assert view["cumulative"].mean == 100.0
-        assert view["cumulative"].sd == 2.0
-
-    def test_fixed_n_reflects_actual_data(self, fresh_db):
-        """source='固定' → N 显示实际数据点数（而非∞）。"""
-        ids = _seed_full(fresh_db)
-        _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
-                    project_id=ids["project_id"], date="2026-04-01", value=100.0)
-        _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
-                    project_id=ids["project_id"], date="2026-04-02", value=101.0)
-        view = S.get_statistics_view(
-            fresh_db,
-            test_item_id=ids["test_item_id_l"],
-            lot="LOT1", level="L",
-            source="固定",
-            today=date(2026, 4, 15),
-        )
-        assert view["month"].n == 2
-
-
-# ============================================================================
-# §C.1 b：source='累计' 时按历史重算
-# ============================================================================
-
-class TestSourceCumulative:
-    """source='累计'：均值/SD 按历史重算"""
-
-    def test_cumulative_recalculates(self, fresh_db):
-        """source='累计' → 累计统计按历史计算（不等同靶值）。"""
+    def test_source_param_ignored_same_result(self, fresh_db):
+        """source='固定' 与 '累计' → 统计区结果相同，都是按数据算。"""
         ids = _seed_full(fresh_db, target=100.0, sd=2.0,
                          created_at="2026-01-01T00:00:00")
-        # 录 3 条历史均值=105，sd=1
-        for v in [104.0, 105.0, 106.0]:
+        for v in [101.0, 102.0, 103.0]:
+            _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
+                       project_id=ids["project_id"], date="2026-03-01", value=v)
+        _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
+                   project_id=ids["project_id"], date="2026-04-01", value=101.0)
+        v_fixed = S.get_statistics_view(
+            fresh_db, test_item_id=ids["test_item_id_l"],
+            lot="LOT1", level="L", source="固定",
+            today=date(2026, 4, 15),
+        )
+        v_cum = S.get_statistics_view(
+            fresh_db, test_item_id=ids["test_item_id_l"],
+            lot="LOT1", level="L", source="累计",
+            today=date(2026, 4, 15),
+        )
+        assert v_fixed["month"].to_dict() == v_cum["month"].to_dict()
+        assert v_fixed["cumulative"].to_dict() == v_cum["cumulative"].to_dict()
+
+    def test_view_defaults_source_param(self, fresh_db):
+        """不传 source 也能算（默认参数），统计区按数据实算。"""
+        ids = _seed_full(fresh_db, target=100.0, sd=2.0,
+                         created_at="2026-01-01T00:00:00")
+        _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
+                   project_id=ids["project_id"], date="2026-03-01", value=105.0)
+        view = S.get_statistics_view(
+            fresh_db, test_item_id=ids["test_item_id_l"],
+            lot="LOT1", level="L",
+            today=date(2026, 4, 15),
+        )
+        # 累计均值按数据算（105），不是配置靶值 100
+        assert abs(view["cumulative"].mean - 105.0) < 0.1
+
+    def test_cumulative_recalculates(self, fresh_db):
+        """累计统计按历史计算（不等同靶值）。"""
+        ids = _seed_full(fresh_db, target=100.0, sd=2.0,
+                         created_at="2026-01-01T00:00:00")
+        for v in [101.0, 102.0, 103.0]:
             _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
                        project_id=ids["project_id"], date="2026-03-01", value=v)
         view = S.get_statistics_view(
@@ -236,29 +221,13 @@ class TestSourceCumulative:
             source="累计",
             today=date(2026, 4, 15),
         )
-        # 累计均值 ≈ 105，不等于靶值 100
+        # 累计均值 ≈ 102（101/102/103 样本均值），不等于靶值 100
         assert view["cumulative"].mean is not None
-        assert abs(view["cumulative"].mean - 105.0) < 0.1
+        assert abs(view["cumulative"].mean - 102.0) < 0.1
         # 累计 sd ≠ 2.0（手填值）
         assert view["cumulative"].sd != 2.0
-
-    def test_cumulative_switch_changes_display(self, fresh_db):
-        """切换 source → 统计区显示立即变化。"""
-        ids = _seed_full(fresh_db, target=100.0, sd=2.0)
-        _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
-                   project_id=ids["project_id"], date="2026-03-01", value=110.0)
-        view_fixed = S.get_statistics_view(
-            fresh_db, test_item_id=ids["test_item_id_l"],
-            lot="LOT1", level="L", source="固定",
-            today=date(2026, 4, 15),
-        )
-        view_cum = S.get_statistics_view(
-            fresh_db, test_item_id=ids["test_item_id_l"],
-            lot="LOT1", level="L", source="累计",
-            today=date(2026, 4, 15),
-        )
-        # 两种模式的累计统计不相等
-        assert view_fixed["cumulative"].mean != view_cum["cumulative"].mean
+        # 累计 CV% 有值（用户裁定：累计 CV% 必须算出来）
+        assert view["cumulative"].cv_pct is not None
 
 
 # ============================================================================
@@ -308,7 +277,7 @@ class TestMonthScope:
 
 
 class TestCumulativeScope:
-    """累计统计区间 = 建立日 ~ 上一自然月最后一天"""
+    """累计统计区间 = 第一条质控数据日期 ~ 上一自然月最后一天（2026-10-13 裁定）"""
 
     def test_cum_scope_stops_at_prev_month(self, fresh_db):
         """4 月查：累计止于 3 月底，不含 4 月。"""
@@ -326,8 +295,25 @@ class TestCumulativeScope:
         assert stats.n == 1
         assert abs(stats.mean - 99.0) < 0.1
 
-    def test_cum_scope_empty_when_created_after_prev_month(self, fresh_db):
-        """4 月新建的检测指标：建立日 > 上一月最后一天 → N=0。"""
+    def test_cum_start_is_first_data_not_created_at(self, fresh_db):
+        """起点 = 第一条数据日期，不是建库日：建库日晚于上月结束、
+        但首条数据在上月之前 → 累计有值。"""
+        ids = _seed_full(fresh_db, created_at="2026-04-01T00:00:00")
+        _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
+                   project_id=ids["project_id"], date="2026-03-10", value=100.0)
+        _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
+                   project_id=ids["project_id"], date="2026-03-11", value=102.0)
+        stats = S.compute_cumulative_stats(
+            fresh_db, test_item_id=ids["test_item_id_l"],
+            lot="LOT1", level="L",
+            today=date(2026, 4, 15),
+        )
+        # 旧实现按建库日（04-01 > 03-31）→ N=0；新口径按首条数据 → N=2
+        assert stats.n == 2
+        assert abs(stats.mean - 101.0) < 0.1
+
+    def test_cum_scope_empty_when_first_data_after_prev_month(self, fresh_db):
+        """首条数据 > 上一月最后一天 → 累计区间为空 → N=0。"""
         ids = _seed_full(fresh_db, created_at="2026-04-01T00:00:00")
         _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
                    project_id=ids["project_id"], date="2026-04-10", value=100.0)
@@ -464,6 +450,84 @@ class TestVoidExcluded:
 
 
 # ============================================================================
+# 2026-10-13 裁定：累计刨除失控点（警告点保留）；本月含失控点
+# ============================================================================
+
+class TestOOCExclusion:
+    """累计 = 首数据~上月 刨除失控；本月 = 本月内全部数据（含失控）。"""
+
+    def test_cumulative_excludes_ooc(self, fresh_db):
+        """累计刨失控：3 条在控 + 1 条失控 → N=3、均值只算在控的。"""
+        ids = _seed_full(fresh_db, target=100.0, sd=2.0,
+                         created_at="2026-01-01T00:00:00")
+        for d, v in [("2026-03-01", 100.0), ("2026-03-02", 100.0),
+                     ("2026-03-03", 100.0), ("2026-03-04", 110.0)]:
+            _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
+                       project_id=ids["project_id"], date=d, value=v)
+        stats = S.compute_cumulative_stats(
+            fresh_db, test_item_id=ids["test_item_id_l"],
+            lot="LOT1", level="L",
+            today=date(2026, 4, 15),
+        )
+        assert stats.n == 3
+        assert stats.mean == 100.0
+        assert stats.sd == 0.0
+
+    def test_cumulative_keeps_warning(self, fresh_db):
+        """警告(1_2s) 点保留参与累计。"""
+        ids = _seed_full(fresh_db, target=100.0, sd=2.0,
+                         created_at="2026-01-01T00:00:00")
+        _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
+                   project_id=ids["project_id"], date="2026-03-01", value=100.0)
+        m_w = M.create_measurement(
+            fresh_db, test_item_id=ids["test_item_id_l"],
+            project_id=ids["project_id"], lot="LOT1", level="L",
+            date="2026-03-02", value=104.1,  # +2.05SD → 警告(1_2s)
+        )
+        assert m_w.status.startswith("警告")
+        stats = S.compute_cumulative_stats(
+            fresh_db, test_item_id=ids["test_item_id_l"],
+            lot="LOT1", level="L",
+            today=date(2026, 4, 15),
+        )
+        assert stats.n == 2
+        assert abs(stats.mean - 102.05) < 0.01
+
+    def test_cumulative_cv_computed(self, fresh_db):
+        """累计 CV% 必须算出来（用户裁定）。"""
+        ids = _seed_full(fresh_db, target=100.0, sd=2.0,
+                         created_at="2026-01-01T00:00:00")
+        for d, v in [("2026-03-01", 98.0), ("2026-03-02", 100.0),
+                     ("2026-03-03", 102.0)]:
+            _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
+                       project_id=ids["project_id"], date=d, value=v)
+        stats = S.compute_cumulative_stats(
+            fresh_db, test_item_id=ids["test_item_id_l"],
+            lot="LOT1", level="L",
+            today=date(2026, 4, 15),
+        )
+        assert stats.cv_pct is not None
+        # cv = sd/mean*100 = 2/100*100 = 2.0
+        assert abs(stats.cv_pct - 2.0) < 0.01
+
+    def test_month_includes_ooc(self, fresh_db):
+        """本月不刨失控：本月内 1 条在控 + 1 条失控 → N=2 都算。"""
+        ids = _seed_full(fresh_db, target=100.0, sd=2.0,
+                         created_at="2026-01-01T00:00:00")
+        _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
+                   project_id=ids["project_id"], date="2026-04-01", value=100.0)
+        _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
+                   project_id=ids["project_id"], date="2026-04-02", value=110.0)
+        stats = S.compute_month_stats(
+            fresh_db, test_item_id=ids["test_item_id_l"],
+            lot="LOT1", level="L",
+            today=date(2026, 4, 15),
+        )
+        assert stats.n == 2
+        assert abs(stats.mean - 105.0) < 0.1
+
+
+# ============================================================================
 # §C.1 d：统计页两栏独立
 # ============================================================================
 
@@ -561,44 +625,62 @@ class TestSourceSwitchable:
 
 
 # ============================================================================
-# 快照：固定/累计 模式下统计区行为差异
+# 2026-10-13 裁定：统计区显示数据实算值，不是配置靶值/SD
 # ============================================================================
 
-class TestSnapshotFixedVsCumulative:
-    """快照：source='固定' vs '累计' 的统计区差异"""
+class TestStatsComputedNotConfig:
+    """统计区两栏 = 按数据实算（配置靶值/SD 只用于新建指标和 Westgard 判定）"""
 
-    def test_fixed_no_history_calculation(self, fresh_db):
-        """固定模式：统计区永远不按历史数据算 mean/sd"""
-        ids = _seed_full(fresh_db, target=200.0, sd=4.0,
+    def test_month_mean_is_computed_not_target(self, fresh_db):
+        ids = _seed_full(fresh_db, target=100.0, sd=50.0,
                          created_at="2026-01-01T00:00:00")
-        # 录一堆均值 150 的历史数据
-        for v in [149, 150, 151, 149, 150]:
+        for v in [149.0, 150.0, 151.0]:
             _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
-                       project_id=ids["project_id"], date="2026-03-15", value=v)
+                       project_id=ids["project_id"], date="2026-04-01", value=v)
         view = S.get_statistics_view(
             fresh_db, test_item_id=ids["test_item_id_l"],
             lot="LOT1", level="L",
             source="固定",
             today=date(2026, 4, 15),
         )
-        # 累计栏显示靶值，不受历史影响
-        assert view["cumulative"].mean == 200.0
-        assert view["cumulative"].sd == 4.0
-        assert view["cumulative"].cv_pct == 2.0  # 4/200*100
+        # 本月均值 = 实算 150，不是配置靶值 100
+        assert abs(view["month"].mean - 150.0) < 0.1
+        # 本月 SD = 实算 1.0，不是配置 SD 50
+        assert abs(view["month"].sd - 1.0) < 0.01
 
-    def test_cumulative_uses_history_mean(self, fresh_db):
-        """累计模式：累计栏按历史计算均值"""
-        ids = _seed_full(fresh_db, target=200.0, sd=4.0,
+    def test_cumulative_mean_is_computed_not_target(self, fresh_db):
+        ids = _seed_full(fresh_db, target=100.0, sd=50.0,
                          created_at="2026-01-01T00:00:00")
-        for v in [149, 150, 151, 149, 150]:
+        for v in [149.0, 150.0, 151.0]:
             _seed_meas(fresh_db, test_item_id=ids["test_item_id_l"],
-                       project_id=ids["project_id"], date="2026-03-15", value=v)
+                       project_id=ids["project_id"], date="2026-03-01", value=v)
         view = S.get_statistics_view(
             fresh_db, test_item_id=ids["test_item_id_l"],
             lot="LOT1", level="L",
-            source="累计",
+            source="固定",
             today=date(2026, 4, 15),
         )
-        # 累计栏均值 ≈ 150，不等于靶值 200
-        # 注：[149,150,151,149,150] 样本均值=149.8（浮点）
-        assert abs(view["cumulative"].mean - 150.0) < 0.21
+        # 累计均值 = 实算 150，不是配置靶值 100
+        assert abs(view["cumulative"].mean - 150.0) < 0.1
+        assert abs(view["cumulative"].sd - 1.0) < 0.01
+
+
+# ============================================================================
+# Web 统计看板：累计 SD / 累计 CV% 卡片存在（2026-10-13 修复）
+# ============================================================================
+
+class TestWebStatsCards:
+    """index.html 统计看板必须渲染 本月 + 累计 的 N/均值/SD/CV% 全部卡片"""
+
+    def test_cumulative_sd_cv_cards_exist(self):
+        html = (Path(__file__).resolve().parent.parent
+                / "qc_tool" / "web" / "templates" / "index.html").read_text(encoding="utf-8")
+        assert 'mk("本月 N"' in html
+        assert 'mk("本月 均值"' in html
+        assert 'mk("本月 SD"' in html
+        assert 'mk("本月 CV%"' in html
+        assert 'mk("累计 N"' in html
+        assert 'mk("累计 均值"' in html
+        # 2026-10-13 修复：此前漏渲染的累计 SD / 累计 CV% 卡片
+        assert 'mk("累计 SD"' in html, "缺「累计 SD」卡片"
+        assert 'mk("累计 CV%"' in html, "缺「累计 CV%」卡片"

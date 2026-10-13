@@ -428,6 +428,8 @@ async function loadStats() {
     mk("本月 CV%", d.month?.cv_pct != null ? d.month.cv_pct.toFixed(2) + "%" : "—");
     mk("累计 N", d.cumulative?.n ?? "—");
     mk("累计 均值", d.cumulative?.mean != null ? d.cumulative.mean.toFixed(3) : "—");
+    mk("累计 SD", d.cumulative?.sd != null ? d.cumulative.sd.toFixed(3) : "—");
+    mk("累计 CV%", d.cumulative?.cv_pct != null ? d.cumulative.cv_pct.toFixed(2) + "%" : "—");
   } catch (e) { /* ignore */ }
 }
 

@@ -17,10 +17,12 @@
    - N=1：mean=单值，sd/cv=None
    - 全相同：sd=0.0，cv=None
 4. 作废行不参与统计（与 §B.4 d 一致，调用方在 SQL 阶段已过滤）。
-5. 累计时间区间**不让用户调**（spec §10 第 11 条 + §C.1）。
-   起 = test_items.created_at 的日期部分；
-   止 = 当前自然月第一天的前一天（即上一自然月最后一天）；
-   当累计时间区间为 0 或负 → 当作"无数据"。
+5. 2026-10-13 用户裁定（spec 附录 B.5）：
+   - 统计区两栏始终按数据实算，不受 test_items.source（固定/累计）影响；
+   - 本月统计 = 本月内全部数据（含失控/警告点，只刨作废）；
+   - 累计统计 = 第一条质控数据日期 ~ 上一自然月最后一天，
+     刨除失控点（警告点保留、作废排除）；
+   - 累计时间区间**不让用户调**（spec §10 第 11 条 + §C.1）。
 6. 不读 Westgard / 不写 measurements / out_of_control —— 本模块纯展示统计。
 """
 
@@ -151,21 +153,52 @@ def _fetch_values(
     level: str,
     date_from: str,
     date_to_inclusive: str,
+    exclude_ooc: bool = False,
 ) -> list[float]:
     """从 measurements 表取一段日期区间内的 values（排除作废）。
 
     SQL：按 (test_item_id, lot, level, date) 过滤，date BETWEEN date_from AND date_to_inclusive，
     作废行（status='作废'）不参与统计。
+
+    exclude_ooc=True（2026-10-13 用户裁定"刨除失控点"）：
+    用白名单保留 NULL / '' / 在控 / InControl / 警告* / Warning* 的行，
+    其余状态（失控* / OutOfControl* 等）全部排除；警告点保留参与统计。
     """
+    sql = ("SELECT value FROM measurements "
+           "WHERE test_item_id = ? AND lot = ? AND level = ? "
+           "  AND date >= ? AND date <= ? "
+           "  AND (status IS NULL OR status != '作废') ")
+    if exclude_ooc:
+        sql += ("AND (status IS NULL OR status = '' "
+                "OR status = '在控' OR status = 'InControl' "
+                "OR status LIKE '警告%' OR status LIKE 'Warning%') ")
+    sql += "ORDER BY date, seq, id"
     rows = conn.execute(
-        "SELECT value FROM measurements "
-        "WHERE test_item_id = ? AND lot = ? AND level = ? "
-        "  AND date >= ? AND date <= ? "
-        "  AND (status IS NULL OR status != '作废') "
-        "ORDER BY date, seq, id",
+        sql,
         (test_item_id, lot, level, date_from, date_to_inclusive),
     ).fetchall()
     return [float(r["value"]) for r in rows]
+
+
+def first_data_date(
+    conn: sqlite3.Connection,
+    test_item_id: int,
+    lot: str,
+    level: str,
+) -> Optional[str]:
+    """第一条质控数据的日期（2026-10-13 用户裁定：累计统计起点 = 首条数据日）。
+
+    返回 'YYYY-MM-DD' 或 None（该指标+批号+水平没有任何非作废数据）。
+    """
+    row = conn.execute(
+        "SELECT MIN(date) FROM measurements "
+        "WHERE test_item_id = ? AND lot = ? AND level = ? "
+        "  AND (status IS NULL OR status != '作废')",
+        (test_item_id, lot, level),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return str(row[0])
 
 
 def compute_month_stats(
@@ -198,33 +231,30 @@ def compute_cumulative_stats(
     level: str,
     *,
     today: Optional[date] = None,
+    exclude_ooc: bool = True,
 ) -> Stats:
-    """累计统计：检测指标建立日 ~ 上一自然月最后一天（spec §C.1 d）。
+    """累计统计（2026-10-13 用户裁定）：第一条质控数据日期 ~ 上一自然月最后一天。
 
-    起 = MAX(test_items.created_at 日期部分, 上一自然月最后一天的次日？)  
-       实际：起 = test_items.created_at 的日期部分（spec §C.1 d 明确）
-    止 = 上一自然月最后一天
-    不计入当前自然月（spec §C.1 d 明确）
+    起 = 该指标 + 批号 + 水平的第一条质控数据的日期（不是 test_items.created_at）
+    止 = 上一自然月最后一天（不计入当前自然月）
+    默认刨除失控点（用户裁定"刨除失控点计算"；警告点保留、作废行始终排除）；
+    月报 sheet2 需要"含失控"版本时显式传 exclude_ooc=False。
     """
     today = today or date.today()
-    ti_row = conn.execute(
-        "SELECT created_at FROM test_items WHERE id = ?", (test_item_id,)
-    ).fetchone()
-    if ti_row is None or ti_row["created_at"] is None:
-        return Stats.empty()
-    try:
-        created_d = _parse_iso_date(ti_row["created_at"])
-    except ValueError:
+    start_s = first_data_date(conn, test_item_id, lot, level)
+    if start_s is None:
         return Stats.empty()
 
     end = _last_day_of_prev_month(today)
-    if created_d > end:
-        # 建立日 > 上一自然月最后一天 → 时间区间为空（spec §C.1 / §9 边界：N=0）
+    start_d = datetime.strptime(start_s, "%Y-%m-%d").date()
+    if start_d > end:
+        # 首条数据 > 上一自然月最后一天 → 时间区间为空（N=0）
         return Stats.empty()
 
     vals = _fetch_values(
         conn, test_item_id=test_item_id, lot=lot, level=level,
-        date_from=created_d.isoformat(), date_to_inclusive=end.isoformat(),
+        date_from=start_d.isoformat(), date_to_inclusive=end.isoformat(),
+        exclude_ooc=exclude_ooc,
     )
     return compute_stats_from_values(vals)
 
@@ -239,15 +269,18 @@ def get_statistics_view(
     lot: str,
     level: str,
     *,
-    source: str,
+    source: str = "固定",
     today: Optional[date] = None,
 ) -> dict:
-    """spec §C.1：返回两栏展示数据，按 source 切换。
+    """统计区两栏展示数据。
 
-    source='固定'：mean/sd 来自 test_items.target/sd（手填值），cv_pct=sd/target*100
-    source='累计'：mean/sd 来自历史（按 §C.1 d 区间重算）
-    本月统计：在 source='固定' 下也按"本月内的数据"算 N（spec §C.1 d 明确"本月统计"区间），
-             但当 source='固定' 时 mean/sd/cv 仍用 target/sd 显示。
+    2026-10-13 用户裁定：统计区始终按数据实算，不受 test_items.source
+    （固定/累计）影响——source 只用于新建指标时确定靶值/SD。
+    `source` 参数仅向后兼容保留（不再影响结果）。
+
+    - 本月统计：当前自然月内全部数据（刨作废，含失控/警告点）
+    - 累计统计：第一条质控数据日期 ~ 上一自然月最后一天，
+      刨除失控点（警告点保留、作废排除），N/均值/SD/CV% 全算
 
     返回：
         {
@@ -256,62 +289,13 @@ def get_statistics_view(
         }
     """
     today = today or date.today()
-    if source not in ("固定", "累计"):
-        raise ValueError(f"source 必须是 '固定' 或 '累计'，当前: {source!r}")
-
-    # 1. 区间查值（用于 source='累计' 的均值/SD；source='固定' 仅用于 N）
-    first_this = _first_day_of_month(today)
-    last_this = _last_day_of_month(today)
-    end_prev = _last_day_of_prev_month(today)
-
-    # 本月数据
-    month_vals = _fetch_values(
-        conn, test_item_id=test_item_id, lot=lot, level=level,
-        date_from=first_this.isoformat(), date_to_inclusive=last_this.isoformat(),
+    month_stats = compute_month_stats(
+        conn, test_item_id=test_item_id, lot=lot, level=level, today=today,
     )
-    # 累计数据（建立日 ~ 上一自然月最后一天）
-    ti_row = conn.execute(
-        "SELECT created_at, target, sd FROM test_items WHERE id = ?",
-        (test_item_id,),
-    ).fetchone()
-    if ti_row is None:
-        return {
-            "month": Stats.empty(),
-            "cumulative": Stats.empty(),
-        }
-
-    cum_vals: list[float] = []
-    if ti_row["created_at"] is not None:
-        try:
-            created_d = _parse_iso_date(ti_row["created_at"])
-            if created_d <= end_prev:
-                cum_vals = _fetch_values(
-                    conn, test_item_id=test_item_id, lot=lot, level=level,
-                    date_from=created_d.isoformat(), date_to_inclusive=end_prev.isoformat(),
-                )
-        except ValueError:
-            cum_vals = []
-
-    # 2. 组装两栏
-    if source == "固定":
-        target = float(ti_row["target"])
-        sd_cfg = float(ti_row["sd"])
-        # 固定模式下：mean/sd 来自手填；N 来自实际区间（spec §C.1 d 明确）
-        # 固定模式：N=0 时仍显示靶值/sd 作为参考（spec §C.1 b 明确"显示配置的靶值与 SD"）
-        mean_f = round(target, ROUND_PRECISION)
-        sd_f = round(sd_cfg, ROUND_PRECISION)
-        if sd_f == 0.0 or mean_f == 0.0:
-            cv_f: Optional[float] = None
-        else:
-            cv_f = round((sd_f / mean_f) * 100.0, ROUND_PRECISION)
-        month_stats = Stats(n=len(month_vals), mean=mean_f, sd=sd_f, cv_pct=cv_f)
-        # 累计栏：N=0 时也显示靶值/sd 作为参考（固定模式原则一致）
-        cum_stats = Stats(n=len(cum_vals), mean=mean_f, sd=sd_f, cv_pct=cv_f)
-    else:
-        # source='累计'：mean/sd 来自历史
-        month_stats = compute_stats_from_values(month_vals)
-        cum_stats = compute_stats_from_values(cum_vals)
-
+    cum_stats = compute_cumulative_stats(
+        conn, test_item_id=test_item_id, lot=lot, level=level,
+        today=today, exclude_ooc=True,
+    )
     return {"month": month_stats, "cumulative": cum_stats}
 
 
@@ -322,4 +306,5 @@ __all__ = [
     "compute_month_stats",
     "compute_cumulative_stats",
     "get_statistics_view",
+    "first_data_date",
 ]

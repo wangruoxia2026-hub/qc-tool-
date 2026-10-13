@@ -289,19 +289,20 @@ def _write_sheet2_累计统计(
     lot: str,
     level: str,
 ) -> None:
-    """G.1 sheet 2: 累计统计（建库日 ~ 上一自然月最后一天）。"""
+    """G.1 sheet 2: 累计统计（第一条质控数据 ~ 上一自然月最后一天，含失控点）。"""
     sheet_name = _truncate_sheet_name(_SHEET2_NAME.format(label=label))
     ws = wb.create_sheet(sheet_name)
     headers = ["N", "均值", "SD", "CV%", "区间说明"]
     for i, h in enumerate(headers, start=1):
         ws.cell(row=1, column=i, value=h)
     _fill_header_row(ws, headers)
-    # 复用 §C 累计统计
+    # 复用 §C 累计统计；sheet2 保持"含失控"语义 → 显式 exclude_ooc=False
     stats = S.compute_cumulative_stats(
         conn, test_item_id=test_item_id, lot=lot, level=level,
+        exclude_ooc=False,
     )
     # 区间说明
-    interval = _describe_cumulative_range(conn, test_item_id)
+    interval = _describe_cumulative_range(conn, test_item_id, lot, level)
     ws.cell(row=2, column=5, value=interval)
     if stats.n == 0:
         ws.cell(row=2, column=1, value=_NO_DATA_TEXT)
@@ -324,49 +325,23 @@ def _write_sheet3_去失控累计(
     lot: str,
     level: str,
 ) -> None:
-    """G.1 sheet 3: 去失控累计（排除 OutOfControl* + Void，保留 InControl + Warning*）。"""
+    """G.1 sheet 3: 去失控累计（第一条质控数据 ~ 上一自然月最后一天，排除失控 + 作废）。"""
     sheet_name = _truncate_sheet_name(_SHEET3_NAME.format(label=label))
     ws = wb.create_sheet(sheet_name)
     headers = ["N", "均值", "SD", "CV%", "范围说明"]
     for i, h in enumerate(headers, start=1):
         ws.cell(row=1, column=i, value=h)
     _fill_header_row(ws, headers)
-    # 自定义 SQL：取建库日 ~ 上一自然月最后一天，排除失控 + 作废
-    ti_row = conn.execute(
-        "SELECT created_at FROM test_items WHERE id = ?", (test_item_id,)
-    ).fetchone()
-    today = date.today()
-    last_prev = S._last_day_of_prev_month(today)
-    if ti_row is None or ti_row["created_at"] is None:
-        ws.cell(row=2, column=1, value=_NO_DATA_TEXT)
-        return
-    try:
-        created_d = S._parse_iso_date(ti_row["created_at"])
-    except ValueError:
-        ws.cell(row=2, column=1, value=_NO_DATA_TEXT)
-        return
-    if created_d > last_prev:
-        ws.cell(row=2, column=1, value=_NO_DATA_TEXT)
-        ws.cell(row=2, column=5, value="建库日晚于上一自然月最后一天，无累计数据")
-        return
-    rows = conn.execute(
-        "SELECT value FROM measurements "
-        "WHERE test_item_id = ? AND lot = ? AND level = ? "
-        "  AND date >= ? AND date <= ? "
-        "  AND (status IS NULL OR status = '' "
-        "       OR status = 'InControl' OR status LIKE 'Warning%') "
-        "ORDER BY date, seq, id",
-        (test_item_id, lot, level,
-         created_d.isoformat(), last_prev.isoformat()),
-    ).fetchall()
-    vals = [float(r["value"]) for r in rows]
+    # 复用 §C 累计统计（默认 exclude_ooc=True：刨失控、保留警告、排除作废）
+    stats = S.compute_cumulative_stats(
+        conn, test_item_id=test_item_id, lot=lot, level=level,
+    )
+    interval = _describe_cumulative_range(conn, test_item_id, lot, level)
     ws.cell(row=2, column=5,
-            value=f"建库日~上一自然月最后一天（{created_d} ~ {last_prev}），"
-                  f"已排除'失控'与'作废'")
-    if not vals:
+            value=f"{interval}，已排除'失控'与'作废'")
+    if stats.n == 0:
         ws.cell(row=2, column=1, value=_NO_DATA_TEXT)
         return
-    stats = S.compute_stats_from_values(vals)
     ws.cell(row=2, column=1, value=stats.n)
     if stats.mean is not None:
         ws.cell(row=2, column=2, value=round(stats.mean, S.ROUND_PRECISION))
@@ -377,22 +352,21 @@ def _write_sheet3_去失控累计(
 
 
 def _describe_cumulative_range(
-    conn: sqlite3.Connection, test_item_id: int,
+    conn: sqlite3.Connection,
+    test_item_id: int,
+    lot: str,
+    level: str,
 ) -> str:
-    ti_row = conn.execute(
-        "SELECT created_at FROM test_items WHERE id = ?", (test_item_id,)
-    ).fetchone()
+    """累计区间说明（2026-10-13 用户裁定：起点 = 第一条质控数据日期）。"""
     today = date.today()
     last_prev = S._last_day_of_prev_month(today)
-    if ti_row is None or ti_row["created_at"] is None:
-        return "无建库日"
-    try:
-        created_d = S._parse_iso_date(ti_row["created_at"])
-    except ValueError:
-        return "建库日格式异常"
-    if created_d > last_prev:
-        return f"建库日 {created_d} 晚于上一自然月最后一天 {last_prev}，无累计数据"
-    return f"建库日 {created_d} ~ 上一自然月最后一天 {last_prev}（不含当月）"
+    start_s = S.first_data_date(conn, test_item_id, lot, level)
+    if start_s is None:
+        return "无质控数据"
+    if start_s > last_prev.isoformat():
+        return (f"第一条质控数据 {start_s} 晚于上一自然月最后一天 "
+                f"{last_prev}，无累计数据")
+    return f"第一条质控数据 {start_s} ~ 上一自然月最后一天 {last_prev}（不含当月）"
 
 
 def build_monthly_report_xlsx(

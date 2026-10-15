@@ -198,6 +198,48 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
                 _json_response(self, 200, rows)
                 return
 
+            # 自定义区间统计（GET /api/stats/<tid>/custom?start=YYYY-MM-DD&end=YYYY-MM-DD&exclude_ooc=true/false）
+            if path.startswith("/api/stats/") and path.endswith("/custom"):
+                parts = path.split("/")
+                # 路径结构 /api/stats/<tid>/custom，split 后为 ['', 'api', 'stats', '<tid>', 'custom']
+                if len(parts) < 5 or not parts[3].isdigit():
+                    _json_error(self, 404, f"bad custom stats path: {path}")
+                    return
+                tid = int(parts[3])
+                ti = P.get_test_item(self._db(), tid)
+                if ti is None:
+                    _json_error(self, 404, "test_item not found")
+                    return
+                
+                # 获取数据整体起止区间（供默认带入）
+                db_min, db_max = S.get_data_date_range(self._db(), tid, ti.lot, ti.level)
+                
+                # 获取查询参数
+                today = date.today()
+                default_start = db_min or f"{today.year}-{today.month:02d}-01"
+                default_end = db_max or today.isoformat()
+                
+                date_from = qs.get("start", [default_start])[0].strip() or default_start
+                date_to = qs.get("end", [default_end])[0].strip() or default_end
+                exclude_ooc_raw = qs.get("exclude_ooc", ["true"])[0].lower()
+                exclude_ooc = exclude_ooc_raw in ("true", "1", "yes", "t")
+
+                stats = S.compute_interval_stats(
+                    self._db(),
+                    test_item_id=tid,
+                    lot=ti.lot,
+                    level=ti.level,
+                    date_from=date_from,
+                    date_to=date_to,
+                    exclude_ooc=exclude_ooc,
+                )
+                res = stats.to_dict()
+                res["date_range"] = [date_from, date_to]
+                res["db_range"] = [db_min, db_max]
+                res["exclude_ooc"] = exclude_ooc
+                _json_response(self, 200, res)
+                return
+
             # 统计（/api/stats/<tid>?year=YYYY&month=M&source=固定|累计）
             if path.startswith("/api/stats/"):
                 # 路径形如 /api/stats/123 → 123 可能带 ".something"，但我们这里只接数字
@@ -1213,6 +1255,7 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
                     self._db(), plan,
                     project_resolver=_project_resolver,
                     test_item_resolver=_ti_resolver,
+                    skip_duplicates=True,
                 )
                 self._db().commit()
                 # 把 plan.skipped_rows 也带上（spec §B.2 错误报告要写明行号）
@@ -1302,6 +1345,13 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
                     })
                     continue
 
+                # 检查是否为库中已有数据（增量识别）
+                existing_m = self._db().execute(
+                    "SELECT 1 FROM measurements WHERE test_item_id = ? AND lot = ? AND level = ? AND date = ? AND seq = ? LIMIT 1",
+                    (ti_id, r.lot, r.level, r.date, r.seq),
+                ).fetchone()
+                is_duplicate = existing_m is not None
+
                 ok_rows_data.append({
                     "original_row_no": r.original_row_no,
                     "project_name": project_name,
@@ -1311,17 +1361,23 @@ def make_handler(*, db_path: Path) -> type[BaseHTTPRequestHandler]:
                     "date": r.date,
                     "value": r.value,
                     "seq": r.seq,
+                    "is_duplicate": is_duplicate,
                 })
 
             # 按原始行号排序
             ok_rows_data.sort(key=lambda x: x["original_row_no"])
             skipped_rows_data.sort(key=lambda x: x["original_row_no"])
 
+            new_insert_count = sum(1 for r in ok_rows_data if not r["is_duplicate"])
+            duplicate_count = sum(1 for r in ok_rows_data if r["is_duplicate"])
+
             _json_response(self, 200, {
-                "can_import": len(ok_rows_data) > 0,
+                "can_import": new_insert_count > 0,
                 "project_name": project_name,
                 "total_count": len(ok_rows_data) + len(skipped_rows_data),
                 "ok_count": len(ok_rows_data),
+                "new_count": new_insert_count,
+                "duplicate_count": duplicate_count,
                 "skipped_count": len(skipped_rows_data),
                 "ok_rows": ok_rows_data,
                 "skipped_rows": skipped_rows_data,

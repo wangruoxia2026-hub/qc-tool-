@@ -597,16 +597,18 @@ def list_test_items(
     *,
     name: Optional[str] = None,
 ) -> list[TestItem]:
-    """列出某项目下的所有检测指标（可按 name 过滤）。"""
+    """列出某项目下的所有检测指标（可按 name 过滤）。
+    按建档/创建时的添加顺序（id 升序）返回，保持与新建/编辑项目向导一致。
+    """
     if name is None:
         rows = conn.execute(
-            "SELECT * FROM test_items WHERE project_id = ? ORDER BY name, lot, level",
+            "SELECT * FROM test_items WHERE project_id = ? ORDER BY id, lot, level",
             (project_id,),
         ).fetchall()
     else:
         rows = conn.execute(
             "SELECT * FROM test_items WHERE project_id = ? AND name = ? "
-            "ORDER BY lot, level",
+            "ORDER BY id, lot, level",
             (project_id, name),
         ).fetchall()
     return [TestItem.from_row(r) for r in rows]
@@ -658,7 +660,7 @@ def update_test_item(
             continue
         if k == "name":
             vals.append(_ensure_nonempty(v, ProjectNameEmpty))
-        if k == "target":
+        elif k == "target":
             vals.append(_ensure_positive_number(v, "靶值"))
         elif k == "sd":
             vals.append(_ensure_positive_number(v, "SD"))

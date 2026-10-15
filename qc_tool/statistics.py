@@ -201,6 +201,57 @@ def first_data_date(
     return str(row[0])
 
 
+def get_data_date_range(
+    conn: sqlite3.Connection,
+    test_item_id: int,
+    lot: str,
+    level: str,
+) -> tuple[Optional[str], Optional[str]]:
+    """获取当前指标+批号+水平在库质控数据的起止时间 (MIN(date), MAX(date))。
+
+    用于自定义统计弹窗自动带入区间。排除作废数据。
+    """
+    row = conn.execute(
+        "SELECT MIN(date), MAX(date) FROM measurements "
+        "WHERE test_item_id = ? AND lot = ? AND level = ? "
+        "  AND (status IS NULL OR status != '作废')",
+        (test_item_id, lot, level),
+    ).fetchone()
+    if row is None or row[0] is None:
+        return (None, None)
+    return (str(row[0]), str(row[1]))
+
+
+def compute_interval_stats(
+    conn: sqlite3.Connection,
+    test_item_id: int,
+    lot: str,
+    level: str,
+    *,
+    date_from: str,
+    date_to: str,
+    exclude_ooc: bool = True,
+) -> Stats:
+    """计算指定日期区间内的质控数据统计量（N / Mean / SD / CV%）。
+
+    - 支持任意起止日期（可跨月、跨年）；
+    - exclude_ooc=True (默认)：刨除失控点，保留警告点、在控点；
+    - exclude_ooc=False：包含失控点；
+    - 作废点始终排除；
+    - 边界：N=0 返回 empty()，N=1 返回 one()，全相同 SD=0.0，CV%=None。
+    """
+    vals = _fetch_values(
+        conn,
+        test_item_id=test_item_id,
+        lot=lot,
+        level=level,
+        date_from=date_from,
+        date_to_inclusive=date_to,
+        exclude_ooc=exclude_ooc,
+    )
+    return compute_stats_from_values(vals)
+
+
 def compute_month_stats(
     conn: sqlite3.Connection,
     test_item_id: int,
@@ -305,6 +356,8 @@ __all__ = [
     "compute_stats_from_values",
     "compute_month_stats",
     "compute_cumulative_stats",
+    "compute_interval_stats",
     "get_statistics_view",
     "first_data_date",
+    "get_data_date_range",
 ]

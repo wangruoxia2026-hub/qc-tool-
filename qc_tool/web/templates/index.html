@@ -675,15 +675,17 @@
     to { opacity: 1; }
   }
   .modal {
+    position: relative;
     background: #fff;
     border-radius: var(--radius-lg);
     padding: 18px 22px;
     min-width: 440px;
-    max-width: 90vw;
+    max-width: 92vw;
     max-height: 90vh;
     overflow-y: auto;
-    box-shadow: var(--shadow-lg);
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
     border: 1px solid var(--slate-200);
+    user-select: auto;
   }
   .modal h2 {
     font-size: 15px;
@@ -693,6 +695,22 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+    cursor: move;
+    user-select: none;
+    -webkit-user-select: none;
+    padding-bottom: 4px;
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.15s ease;
+  }
+  .modal h2:hover {
+    border-bottom: 1px dashed var(--slate-300);
+  }
+  .modal .modal-drag-handle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    cursor: move;
   }
   .modal .close-btn {
     cursor: pointer;
@@ -702,8 +720,9 @@
     border: none;
     background: transparent;
     padding: 0 4px;
+    border-radius: var(--radius-sm);
   }
-  .modal .close-btn:hover { color: var(--slate-700); }
+  .modal .close-btn:hover { color: var(--slate-700); background: var(--slate-100); }
 
   .checklist-group {
     border: 1px solid var(--slate-200);
@@ -956,6 +975,10 @@
             测量数据列表
           </div>
           <div style="display:flex; gap:6px;">
+            <button class="secondary" id="btn-custom-stats" onclick="openCustomStatsModal()" title="自定义区间数据统计（靶值、SD、CV%）" style="font-weight:600; color:var(--primary); border-color:#93c5fd;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+              数据统计
+            </button>
             <button class="secondary" onclick="loadMeasurements()">刷新</button>
             <button class="secondary" id="btn-template" onclick="downloadTemplate()" title="下载 Excel 批量导入模板（spec §B.3）">下载模板</button>
             <button class="secondary" id="btn-import" onclick="document.getElementById('file-import').click()" title="选择 .xlsx 批量导入（spec §B.2）">导入 Excel</button>
@@ -1401,7 +1424,7 @@ async function showPointPanel(el) {
     <table style="font-size:12px; border-collapse:collapse;">
       <tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">检测日期</td><td>${escapeHtml(d.date)}</td></tr>
       <tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">序号</td><td>${escapeHtml(d.seq)}</td></tr>
-      <tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">检测值</td><td>${escapeHtml(d.value)}</td></tr>
+      <tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">检测值</td><td>${fmt3(d.value)}</td></tr>
       <tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">水平</td><td>${escapeHtml(d.level)}</td></tr>
       <tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">状态</td><td style="color:${color}; font-weight:600;">${label}</td></tr>`;
   if (d.rules) {
@@ -1728,6 +1751,221 @@ async function loadStats() {
   } catch (e) { /* ignore */ }
 }
 
+// ============================================================================
+// 自定义区间数据统计（用户需求 2026-10-15）
+// ============================================================================
+let customStatsCtx = {
+  start: "",
+  end: "",
+  excludeOoc: true
+};
+
+async function openCustomStatsModal() {
+  const it = state.currentTestItem;
+  if (!it) {
+    toast("error", "请先在左侧选择检测指标");
+    return;
+  }
+
+  // 1. 自动带入当前质控数据的起止时间
+  let defaultStart = "";
+  let defaultEnd = "";
+
+  if (state.measurements && state.measurements.length > 0) {
+    const dates = state.measurements
+      .filter(m => m.status !== "作废" && m.date)
+      .map(m => m.date)
+      .sort();
+    if (dates.length > 0) {
+      defaultStart = dates[0];
+      defaultEnd = dates[dates.length - 1];
+    }
+  }
+
+  // 若从测量数据中无法提取，则使用当前自然月
+  if (!defaultStart || !defaultEnd) {
+    const y = $("chart-year") ? $("chart-year").value : new Date().getFullYear();
+    const m = $("chart-month") ? String($("chart-month").value).padStart(2, '0') : "01";
+    defaultStart = `${y}-${m}-01`;
+    defaultEnd = `${y}-${m}-28`;
+  }
+
+  customStatsCtx.start = defaultStart;
+  customStatsCtx.end = defaultEnd;
+  customStatsCtx.excludeOoc = true;
+
+  // 判断是否为成对双水平指标
+  const siblings = state.testItems ? state.testItems.filter(x => x.name === it.name && x.lot === it.lot) : [];
+  const itemL = siblings.find(x => x.level === "L");
+  const itemH = siblings.find(x => x.level === "H");
+  const isPair = !!(itemL && itemH);
+
+  showModal("数据统计 —— 自定义时间区间", `
+    <div style="min-width:480px;">
+      <div style="background:#f8fafc; border:1px solid var(--slate-200); border-radius:var(--radius-md); padding:10px 14px; margin-bottom:12px;">
+        <div style="font-weight:600; color:var(--slate-800); font-size:13px; margin-bottom:4px;">
+          ${escapeHtml(it.name)} <span style="font-weight:400; color:var(--slate-500); font-size:12px;">(批号: ${escapeHtml(it.lot)})</span>
+        </div>
+        <div style="font-size:11.5px; color:var(--slate-500);">
+          系统已自动带入该检测指标质控数据的起止时间，支持跨月自由修改。
+        </div>
+      </div>
+
+      <!-- 时间区间与条件选择 -->
+      <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <label style="font-size:12px; font-weight:500; color:var(--slate-600);">时间区间：</label>
+          <input type="date" id="cs-start-date" value="${customStatsCtx.start}" style="width:130px; height:28px; padding:0 6px; font-size:12px; border:1px solid var(--slate-300); border-radius:var(--radius-md);">
+          <span style="color:var(--slate-400);">至</span>
+          <input type="date" id="cs-end-date" value="${customStatsCtx.end}" style="width:130px; height:28px; padding:0 6px; font-size:12px; border:1px solid var(--slate-300); border-radius:var(--radius-md);">
+        </div>
+        <label style="display:inline-flex; align-items:center; gap:5px; font-size:12px; cursor:pointer; margin-left:auto;">
+          <input type="checkbox" id="cs-exclude-ooc" ${customStatsCtx.excludeOoc ? "checked" : ""}>
+          <span style="font-weight:500; color:var(--slate-700);">刨除失控点计算 (默认)</span>
+        </label>
+        <button onclick="executeCustomStatsCalc()" style="height:28px; padding:0 12px; font-size:12px;">
+          重新计算
+        </button>
+      </div>
+
+      <!-- 结果卡片容器 -->
+      <div id="custom-stats-result-container" style="margin-top:14px;">
+        <div style="text-align:center; padding:20px; color:var(--slate-400); font-size:12px;">正在计算统计量…</div>
+      </div>
+
+      <div class="form-actions" style="margin-top:16px; border-top:1px solid var(--slate-200); padding-top:12px;">
+        <button class="secondary" onclick="closeModal()" style="margin-left:auto;">关闭</button>
+      </div>
+    </div>
+  `);
+
+  // 立即触发首次计算
+  executeCustomStatsCalc();
+}
+
+async function executeCustomStatsCalc() {
+  const it = state.currentTestItem;
+  if (!it) return;
+
+  const startInput = $("cs-start-date");
+  const endInput = $("cs-end-date");
+  const excludeCb = $("cs-exclude-ooc");
+
+  const start = startInput ? startInput.value : customStatsCtx.start;
+  const end = endInput ? endInput.value : customStatsCtx.end;
+  const excludeOoc = excludeCb ? excludeCb.checked : true;
+
+  if (!start || !end) {
+    toast("error", "请完整选择起止日期");
+    return;
+  }
+  if (start > end) {
+    toast("error", "开始日期不能晚于结束日期");
+    return;
+  }
+
+  customStatsCtx.start = start;
+  customStatsCtx.end = end;
+  customStatsCtx.excludeOoc = excludeOoc;
+
+  const container = $("custom-stats-result-container");
+  if (!container) return;
+  container.innerHTML = `<div style="text-align:center; padding:16px; color:var(--slate-400); font-size:12px;">正在统计区间 ${escapeHtml(start)} 至 ${escapeHtml(end)} 数据…</div>`;
+
+  const siblings = state.testItems ? state.testItems.filter(x => x.name === it.name && x.lot === it.lot) : [];
+  const itemL = siblings.find(x => x.level === "L");
+  const itemH = siblings.find(x => x.level === "H");
+  const isPair = !!(itemL && itemH);
+
+  try {
+    let resL = null, resH = null, resSingle = null;
+    const qStr = `start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&exclude_ooc=${excludeOoc ? "true" : "false"}`;
+
+    if (isPair) {
+      [resL, resH] = await Promise.all([
+        api("GET", `/api/stats/${itemL.id}/custom?${qStr}`),
+        api("GET", `/api/stats/${itemH.id}/custom?${qStr}`),
+      ]);
+    } else {
+      resSingle = await api("GET", `/api/stats/${it.id}/custom?${qStr}`);
+    }
+
+    const fmtStat = (val, dec = 3, suffix = "") => {
+      if (val === null || val === undefined) return "—";
+      return Number(val).toFixed(dec) + suffix;
+    };
+
+    let html = "";
+    if (isPair) {
+      html = `
+        <table style="width:100%; border-collapse:collapse; font-size:12.5px; border:1px solid var(--slate-200); border-radius:6px; overflow:hidden;">
+          <thead>
+            <tr style="background:#f1f5f9; color:var(--slate-700); text-align:center;">
+              <th style="padding:8px 10px; border-bottom:1px solid var(--slate-200); text-align:left;">统计指标</th>
+              <th style="padding:8px 10px; border-bottom:1px solid var(--slate-200); width:35%;">L 水平 (低)</th>
+              <th style="padding:8px 10px; border-bottom:1px solid var(--slate-200); width:35%;">H 水平 (高)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr style="border-bottom:1px solid var(--slate-100); text-align:center;">
+              <td style="padding:8px 10px; text-align:left; font-weight:500; color:var(--slate-600);">样本量 N</td>
+              <td style="padding:8px 10px; font-weight:600; color:var(--slate-800);">${resL.n}</td>
+              <td style="padding:8px 10px; font-weight:600; color:var(--slate-800);">${resH.n}</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--slate-100); text-align:center; background:#fafafa;">
+              <td style="padding:8px 10px; text-align:left; font-weight:500; color:var(--slate-600);">均值 / 靶值 (Mean)</td>
+              <td style="padding:8px 10px; font-weight:600; color:var(--primary); font-family:monospace;">${fmtStat(resL.mean, 3)}</td>
+              <td style="padding:8px 10px; font-weight:600; color:var(--primary); font-family:monospace;">${fmtStat(resH.mean, 3)}</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--slate-100); text-align:center;">
+              <td style="padding:8px 10px; text-align:left; font-weight:500; color:var(--slate-600);">标准差 (SD)</td>
+              <td style="padding:8px 10px; font-weight:600; color:var(--slate-800); font-family:monospace;">${fmtStat(resL.sd, 3)}</td>
+              <td style="padding:8px 10px; font-weight:600; color:var(--slate-800); font-family:monospace;">${fmtStat(resH.sd, 3)}</td>
+            </tr>
+            <tr style="text-align:center; background:#fafafa;">
+              <td style="padding:8px 10px; text-align:left; font-weight:500; color:var(--slate-600);">变异系数 (CV%)</td>
+              <td style="padding:8px 10px; font-weight:600; color:#059669;">${fmtStat(resL.cv_pct, 2, "%")}</td>
+              <td style="padding:8px 10px; font-weight:600; color:#059669;">${fmtStat(resH.cv_pct, 2, "%")}</td>
+            </tr>
+          </tbody>
+        </table>
+      `;
+    } else {
+      html = `
+        <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
+          <div class="stat-card" style="padding:10px; border:1px solid var(--slate-200); border-radius:6px; background:#fff; text-align:center;">
+            <div style="font-size:11px; color:var(--slate-500); margin-bottom:4px;">样本量 N</div>
+            <div style="font-size:18px; font-weight:700; color:var(--slate-800);">${resSingle.n}</div>
+          </div>
+          <div class="stat-card" style="padding:10px; border:1px solid var(--slate-200); border-radius:6px; background:#fff; text-align:center;">
+            <div style="font-size:11px; color:var(--slate-500); margin-bottom:4px;">靶值 / 均值</div>
+            <div style="font-size:18px; font-weight:700; color:var(--primary); font-family:monospace;">${fmtStat(resSingle.mean, 3)}</div>
+          </div>
+          <div class="stat-card" style="padding:10px; border:1px solid var(--slate-200); border-radius:6px; background:#fff; text-align:center;">
+            <div style="font-size:11px; color:var(--slate-500); margin-bottom:4px;">标准差 SD</div>
+            <div style="font-size:18px; font-weight:700; color:var(--slate-800); font-family:monospace;">${fmtStat(resSingle.sd, 3)}</div>
+          </div>
+          <div class="stat-card" style="padding:10px; border:1px solid var(--slate-200); border-radius:6px; background:#fff; text-align:center;">
+            <div style="font-size:11px; color:var(--slate-500); margin-bottom:4px;">变异系数 CV%</div>
+            <div style="font-size:18px; font-weight:700; color:#059669;">${fmtStat(resSingle.cv_pct, 2, "%")}</div>
+          </div>
+        </div>
+      `;
+    }
+
+    html += `
+      <div style="margin-top:10px; font-size:11.5px; color:var(--slate-500); display:flex; justify-content:space-between;">
+        <span>统计区间: <b>${escapeHtml(start)}</b> 至 <b>${escapeHtml(end)}</b></span>
+        <span>${excludeOoc ? "✓ 已刨除失控点 (作废点不计入)" : "包含全部测定点 (作废点不计入)"}</span>
+      </div>
+    `;
+
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = `<div style="text-align:center; padding:16px; color:var(--danger); font-size:12px;">计算失败：${escapeHtml(err?.message || err)}</div>`;
+  }
+}
+
 async function loadMeasurements() {
   const it = state.currentTestItem;
   if (!it) return;
@@ -1741,7 +1979,7 @@ async function loadMeasurements() {
     tr.dataset.id = m.id;
     tr.setAttribute("oncontextmenu", `showRowMenu(event, ${m.id}); return false;`);
     tr.innerHTML = `<td>${m.id}</td><td>${m.date}</td><td>${m.level}</td><td>${m.lot}</td>
-      <td>${m.seq}</td><td class="value">${(m.value ?? 0).toFixed(3)}</td>
+      <td>${m.seq}</td><td class="value">${fmt3(m.value)}</td>
       <td class="status">${statusPill(m.status)}</td><td>${m.rules || "—"}</td>`;
     tbody.appendChild(tr);
   }
@@ -1822,7 +2060,7 @@ function showEditMeasurementModal(mid) {
       </div>
       <div class="form-row"><label>批号</label><input id="em-lot" type="text" value="${escapeHtml(m.lot)}"></div>
       <div class="form-row"><label>序号</label><input id="em-seq" type="number" min="0" value="${m.seq}"></div>
-      <div class="form-row"><label>测定值</label><input id="em-value" type="number" step="0.001" value="${m.value}"></div>
+      <div class="form-row"><label>测定值</label><input id="em-value" type="number" step="0.001" value="${fmt3(m.value)}"></div>
       <div class="form-actions" style="margin-top:12px">
         <button onclick="saveEditMeasurement(${mid})">保存并重新判定</button>
         <button class="secondary" onclick="closeModal()">取消</button>
@@ -1978,22 +2216,101 @@ function resetEntry() {
 }
 
 // ============================================================================
-// 模态弹窗公共管理
+// 模态弹窗公共管理（防外部点击误触 + 支持标题栏拖动）
 // ============================================================================
 function showModal(title, bodyHtml, onMount) {
   const root = $("modal-root");
   root.innerHTML = `
-    <div class="modal-backdrop" onclick="if(event.target===this) closeModal()">
-      <div class="modal">
-        <h2>
-          <span>${title}</span>
-          <button class="close-btn" onclick="closeModal()">×</button>
+    <div class="modal-backdrop">
+      <div class="modal" id="active-modal-box">
+        <h2 id="active-modal-header" title="按住可拖动窗口">
+          <span class="modal-drag-handle">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--slate-400); flex-shrink:0;">
+              <polyline points="5 9 2 12 5 15"></polyline>
+              <polyline points="9 5 12 2 15 5"></polyline>
+              <polyline points="15 19 12 22 9 19"></polyline>
+              <polyline points="19 9 22 12 19 15"></polyline>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <line x1="12" y1="2" x2="12" y2="22"></line>
+            </svg>
+            <span>${title}</span>
+          </span>
+          <button class="close-btn" onclick="closeModal()" title="关闭窗口">×</button>
         </h2>
         <div id="modal-body">${bodyHtml}</div>
       </div>
     </div>`;
+
+  // 绑定标题栏拖拽逻辑
+  setupModalDrag();
+
   if (onMount) onMount();
 }
+
+function setupModalDrag() {
+  const modal = $("active-modal-box");
+  const header = $("active-modal-header");
+  if (!modal || !header) return;
+
+  let isDragging = false;
+  let startX = 0;
+  let startY = 0;
+  let initialLeft = 0;
+  let initialTop = 0;
+
+  header.addEventListener("mousedown", (e) => {
+    // 排除关闭按钮点击
+    if (e.target.closest(".close-btn")) return;
+    isDragging = true;
+    startX = e.clientX;
+    startY = e.clientY;
+
+    const rect = modal.getBoundingClientRect();
+    initialLeft = rect.left;
+    initialTop = rect.top;
+
+    // 清除 flex 居中约束，转换为 fixed 绝对视口定位
+    modal.style.position = "fixed";
+    modal.style.margin = "0";
+    modal.style.left = `${initialLeft}px`;
+    modal.style.top = `${initialTop}px`;
+
+    document.body.style.userSelect = "none";
+    header.style.cursor = "grabbing";
+
+    const onMouseMove = (ev) => {
+      if (!isDragging) return;
+      const dx = ev.clientX - startX;
+      const dy = ev.clientY - startY;
+
+      let newLeft = initialLeft + dx;
+      let newTop = initialTop + dy;
+
+      // 视口边界保护：防止弹窗被拖出视口外面看不见
+      const maxLeft = window.innerWidth - 80;
+      const maxTop = window.innerHeight - 50;
+      if (newLeft < -(rect.width - 80)) newLeft = -(rect.width - 80);
+      if (newLeft > maxLeft) newLeft = maxLeft;
+      if (newTop < 10) newTop = 10;
+      if (newTop > maxTop) newTop = maxTop;
+
+      modal.style.left = `${newLeft}px`;
+      modal.style.top = `${newTop}px`;
+    };
+
+    const onMouseUp = () => {
+      isDragging = false;
+      document.body.style.userSelect = "";
+      header.style.cursor = "move";
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  });
+}
+
 function closeModal() { $("modal-root").innerHTML = ""; }
 
 async function openLabSettings() {
@@ -2066,6 +2383,7 @@ async function editProject() {
       itemMap.set(key, {
         name: it.name,
         lot: it.lot || "LOT2026A",
+        unit: it.unit || "",
         itemL: null,
         itemH: null,
       });
@@ -2078,6 +2396,7 @@ async function editProject() {
       grp.itemH = it;
       if (it.lot) grp.lot = it.lot;
     }
+    if (it.unit) grp.unit = it.unit;
   });
 
   let cardId = 1;
@@ -2090,6 +2409,7 @@ async function editProject() {
       id: cardId++,
       name: grp.name,
       lot: grp.lot,
+      unit: grp.unit || "",
       mode: "manual",
       lTarget: lVal,
       lSd: lSdVal,
@@ -2107,6 +2427,7 @@ async function editProject() {
       id: 1,
       name: p.name,
       lot: "LOT2026A",
+      unit: "",
       mode: "manual",
       lTarget: 40.0,
       lSd: 2.0,
@@ -2261,6 +2582,7 @@ async function saveIntegratedEdit(projectId) {
     const lSd = $(`l-sd-${item.id}`) ? parseFloat($(`l-sd-${item.id}`).value) : item.lSd;
     const hTarget = $(`h-target-${item.id}`) ? parseFloat($(`h-target-${item.id}`).value) : item.hTarget;
     const hSd = $(`h-sd-${item.id}`) ? parseFloat($(`h-sd-${item.id}`).value) : item.hSd;
+    const itemUnit = $(`item-unit-${item.id}`) ? $(`item-unit-${item.id}`).value.trim() : (item.unit || "");
 
     if (!itemName) { toast("error", `检测指标 #${idx + 1} 的指标名称不能为空`); return; }
     if (!itemLot) { toast("error", `检测指标「${itemName}」的批号不能为空`); return; }
@@ -2276,6 +2598,7 @@ async function saveIntegratedEdit(projectId) {
     item.lSd = lSd;
     item.hTarget = hTarget;
     item.hSd = hSd;
+    item.unit = itemUnit;
   }
 
   try {
@@ -2300,6 +2623,7 @@ async function saveIntegratedEdit(projectId) {
         const updatedL = await api("PUT", `/api/test_items/${item.itemLId}`, {
           name: item.name,
           lot: item.lot,
+          unit: item.unit || null,
           target: item.lTarget,
           sd: item.lSd,
           manufacturer: projMfr || null,
@@ -2312,6 +2636,7 @@ async function saveIntegratedEdit(projectId) {
           name: item.name,
           level: "L",
           lot: item.lot,
+          unit: item.unit || null,
           target: item.lTarget,
           sd: item.lSd,
           manufacturer: projMfr || null,
@@ -2326,6 +2651,7 @@ async function saveIntegratedEdit(projectId) {
         const updatedH = await api("PUT", `/api/test_items/${item.itemHId}`, {
           name: item.name,
           lot: item.lot,
+          unit: item.unit || null,
           target: item.hTarget,
           sd: item.hSd,
           manufacturer: projMfr || null,
@@ -2338,6 +2664,7 @@ async function saveIntegratedEdit(projectId) {
           name: item.name,
           level: "H",
           lot: item.lot,
+          unit: item.unit || null,
           target: item.hTarget,
           sd: item.hSd,
           manufacturer: projMfr || null,
@@ -2510,10 +2837,47 @@ async function saveAddLot(tid) {
 // ============================================================================
 let integItems = [];
 
+// 临床检验六大专业常用单位（二级分组：optgroup 分类 → 单选具体单位）
+const CLINICAL_UNIT_GROUPS = [
+  { group: "生化", units: ["mmol/L", "μmol/L", "g/L", "mg/L", "U/L"] },
+  { group: "血常规", units: ["×10⁹/L", "×10¹²/L", "g/L", "fL", "pg"] },
+  { group: "免疫", units: ["ng/mL", "pg/mL", "μg/L", "IU/mL", "mIU/L"] },
+  { group: "血气", units: ["mmHg", "kPa", "mmol/L"] },
+  { group: "凝血", units: ["秒", "g/L", "mg/L FEU", "INR"] },
+  { group: "微生物/病毒", units: ["CFU/mL", "copies/mL", "IU/mL"] },
+];
+
+// 生成按专业二级分组的单位下拉选项；selected 为空串表示"未设置"
+function unitOptionsHtml(selected) {
+  const html = [`<option value=""${selected ? "" : " selected"}>— 不设置单位 —</option>`];
+  CLINICAL_UNIT_GROUPS.forEach(g => {
+    html.push(`<optgroup label="${escapeHtml(g.group)}">`);
+    g.units.forEach(u => {
+      const sel = (u === selected) ? " selected" : "";
+      html.push(`<option value="${escapeHtml(u)}"${sel}>${escapeHtml(u)}</option>`);
+    });
+    html.push("</optgroup>");
+  });
+  return html.join("");
+}
+
+// 单位变动时同步刷新 L/H 双水平卡片右上角的单位徽标
+function refreshUnitBadges(itemId, unit) {
+  const text = unit || "未设单位";
+  ["l", "h"].forEach(k => {
+    const el = $(`unit-badge-${k}-${itemId}`);
+    if (el) {
+      el.textContent = text;
+      el.style.color = unit ? "#1e40af" : "#94a3b8";
+      el.style.fontWeight = unit ? "600" : "normal";
+    }
+  });
+}
+
 function openIntegratedModal() {
   const currentLab = state.labName || "";
   integItems = [
-    { id: 1, name: "ALT", lot: "LOT2026A", mode: "manual", lTarget: 40.0, lSd: 2.0, hTarget: 120.0, hSd: 6.0, calcReport: "" }
+    { id: 1, name: "ALT", lot: "LOT2026A", unit: "", mode: "manual", lTarget: 40.0, lSd: 2.0, hTarget: 120.0, hSd: 6.0, calcReport: "" }
   ];
 
   const html = `
@@ -2671,9 +3035,9 @@ function renderIntegItems() {
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
         <!-- 低水平 L -->
         <div style="border:1px solid #bfdbfe; background:#eff6ff; border-radius:var(--radius-sm); padding:8px;">
-          <div style="font-weight:600; color:#1e40af; margin-bottom:6px; display:flex; justify-content:space-between;">
+          <div style="font-weight:600; color:#1e40af; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
             <span>低水平 (L)</span>
-            <span style="font-size:10px; font-weight:normal; color:#3b82f6;">低值质控限</span>
+            <span id="unit-badge-l-${item.id}" style="font-size:10.5px; font-weight:${item.unit ? '600' : 'normal'}; color:${item.unit ? '#1e40af' : '#94a3b8'};">${escapeHtml(item.unit || '未设单位')}</span>
           </div>
           <div class="form-row"><label style="width:52px;">靶值 *</label><input type="number" id="l-target-${item.id}" value="${item.lTarget}" step="0.001" onchange="updateItemData(${item.id}, 'lTarget', parseFloat(this.value))"></div>
           <div class="form-row"><label style="width:52px;">SD *</label><input type="number" id="l-sd-${item.id}" value="${item.lSd}" step="0.001" onchange="updateItemData(${item.id}, 'lSd', parseFloat(this.value))"></div>
@@ -2681,13 +3045,21 @@ function renderIntegItems() {
 
         <!-- 高水平 H -->
         <div style="border:1px solid #fbcfe8; background:#fdf2f8; border-radius:var(--radius-sm); padding:8px;">
-          <div style="font-weight:600; color:#9d174d; margin-bottom:6px; display:flex; justify-content:space-between;">
+          <div style="font-weight:600; color:#9d174d; margin-bottom:6px; display:flex; justify-content:space-between; align-items:center;">
             <span>高水平 (H)</span>
-            <span style="font-size:10px; font-weight:normal; color:#ec4899;">高值质控限</span>
+            <span id="unit-badge-h-${item.id}" style="font-size:10.5px; font-weight:${item.unit ? '600' : 'normal'}; color:${item.unit ? '#9d174d' : '#94a3b8'};">${escapeHtml(item.unit || '未设单位')}</span>
           </div>
           <div class="form-row"><label style="width:52px;">靶值 *</label><input type="number" id="h-target-${item.id}" value="${item.hTarget}" step="0.001" onchange="updateItemData(${item.id}, 'hTarget', parseFloat(this.value))"></div>
           <div class="form-row"><label style="width:52px;">SD *</label><input type="number" id="h-sd-${item.id}" value="${item.hSd}" step="0.001" onchange="updateItemData(${item.id}, 'hSd', parseFloat(this.value))"></div>
         </div>
+      </div>
+
+      <!-- 该指标的单位选择（L/H 双水平共用同一单位，二级分类单选） -->
+      <div class="form-row" style="margin:8px 0 0 0;">
+        <label style="width:68px;">检测单位</label>
+        <select id="item-unit-${item.id}" style="flex:1;" onchange="updateItemData(${item.id}, 'unit', this.value); refreshUnitBadges(${item.id}, this.value)">
+          ${unitOptionsHtml(item.unit || "")}
+        </select>
       </div>
     `;
     container.appendChild(card);
@@ -2701,6 +3073,7 @@ function addIntegItemCard() {
     id: newId,
     name: `指标${integItems.length + 1}`,
     lot: defaultLot,
+    unit: "",
     mode: "manual",
     lTarget: 40.0,
     lSd: 2.0,
@@ -2881,6 +3254,7 @@ async function onUploadMultiSheetCalcFile(ev) {
         id: idx + 1,
         name: sname,
         lot: defaultLot,
+        unit: "",
         mode: "calc",
         lTarget: lMean,
         lSd: lSd,
@@ -2962,6 +3336,7 @@ async function saveIntegratedAll() {
     const lSd = $(`l-sd-${item.id}`) ? parseFloat($(`l-sd-${item.id}`).value) : item.lSd;
     const hTarget = $(`h-target-${item.id}`) ? parseFloat($(`h-target-${item.id}`).value) : item.hTarget;
     const hSd = $(`h-sd-${item.id}`) ? parseFloat($(`h-sd-${item.id}`).value) : item.hSd;
+    const itemUnit = $(`item-unit-${item.id}`) ? $(`item-unit-${item.id}`).value.trim() : (item.unit || "");
 
     if (!itemName) { toast("error", `检测指标 #${idx + 1} 的指标名称不能为空`); return; }
     if (!itemLot) { toast("error", `检测指标「${itemName}」的批号不能为空`); return; }
@@ -2977,6 +3352,7 @@ async function saveIntegratedAll() {
     item.lSd = lSd;
     item.hTarget = hTarget;
     item.hSd = hSd;
+    item.unit = itemUnit;
   }
 
   try {
@@ -3001,6 +3377,7 @@ async function saveIntegratedAll() {
         name: item.name,
         level: "L",
         lot: item.lot,
+        unit: item.unit || null,
         target: item.lTarget,
         sd: item.lSd,
         manufacturer: projMfr || null,
@@ -3013,6 +3390,7 @@ async function saveIntegratedAll() {
         name: item.name,
         level: "H",
         lot: item.lot,
+        unit: item.unit || null,
         target: item.hTarget,
         sd: item.hSd,
         manufacturer: projMfr || null,
@@ -3051,7 +3429,7 @@ async function openInvestigation(m) {
       4. 不要把以前已纠正的失控值再纳入跨批规则判定
     </div>
     <div style="font-size:12px; margin:8px 0; color:var(--slate-700);">
-      <b>触发详情：</b>${m.date} #${m.seq} 测定值=${m.value?.toFixed(3)} · <b>触发规则：</b><span style="color:var(--danger);font-weight:bold;">${escapeHtml(m.rules || "—")}</span>
+      <b>触发详情：</b>${m.date} #${m.seq} 测定值=${fmt3(m.value)} · <b>触发规则：</b><span style="color:var(--danger);font-weight:bold;">${escapeHtml(m.rules || "—")}</span>
     </div>
   `;
   for (const cat of cats) {
@@ -3275,30 +3653,45 @@ function openImportPreviewModal(preview, f) {
   const okRows = preview.ok_rows || [];
   const skippedRows = preview.skipped_rows || [];
   const total = preview.total_count || (okRows.length + skippedRows.length);
-  const canImport = preview.can_import && okRows.length > 0;
+  const newCount = preview.new_count !== undefined ? preview.new_count : okRows.filter(r => !r.is_duplicate).length;
+  const duplicateCount = preview.duplicate_count !== undefined ? preview.duplicate_count : okRows.filter(r => r.is_duplicate).length;
+  const canImport = preview.can_import && newCount > 0;
 
   let html = `
-    <div style="min-width:620px; max-width:820px;">
+    <div style="min-width:640px; max-width:860px;">
       <!-- 汇总卡片 -->
-      <div style="display:flex; gap:12px; margin-bottom:12px;">
-        <div style="flex:1; background:var(--slate-50); border:1px solid var(--slate-200); border-radius:var(--radius-sm); padding:10px 14px;">
+      <div style="display:flex; gap:10px; margin-bottom:12px;">
+        <div style="flex:1; background:var(--slate-50); border:1px solid var(--slate-200); border-radius:var(--radius-sm); padding:10px 12px;">
           <div style="font-size:11px; color:var(--slate-500);">文件信息</div>
           <div style="font-weight:600; color:var(--slate-800); margin-top:2px; word-break:break-all;">${escapeHtml(f.name)} (${(f.size / 1024).toFixed(1)} KB)</div>
         </div>
-        <div style="width:110px; background:var(--slate-50); border:1px solid var(--slate-200); border-radius:var(--radius-sm); padding:10px 14px; text-align:center;">
-          <div style="font-size:11px; color:var(--slate-500);">数据总行数</div>
-          <div style="font-weight:700; font-size:16px; color:var(--slate-800); margin-top:2px;">${total}</div>
+        <div style="width:95px; background:var(--slate-50); border:1px solid var(--slate-200); border-radius:var(--radius-sm); padding:10px 8px; text-align:center;">
+          <div style="font-size:11px; color:var(--slate-500);">数据总行</div>
+          <div style="font-weight:700; font-size:15px; color:var(--slate-800); margin-top:2px;">${total}</div>
         </div>
-        <div style="width:110px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:var(--radius-sm); padding:10px 14px; text-align:center;">
-          <div style="font-size:11px; color:#166534;">可导入行数</div>
-          <div style="font-weight:700; font-size:16px; color:var(--success); margin-top:2px;">${okRows.length}</div>
+        <div style="width:105px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:var(--radius-sm); padding:10px 8px; text-align:center;">
+          <div style="font-size:11px; color:#166534;">新增导入行</div>
+          <div style="font-weight:700; font-size:15px; color:var(--success); margin-top:2px;">${newCount}</div>
         </div>
-        <div style="width:110px; background:#fef2f2; border:1px solid #fecaca; border-radius:var(--radius-sm); padding:10px 14px; text-align:center;">
-          <div style="font-size:11px; color:#991b1b;">异常跳过行数</div>
-          <div style="font-weight:700; font-size:16px; color:var(--danger); margin-top:2px;">${skippedRows.length}</div>
+        <div style="width:105px; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:var(--radius-sm); padding:10px 8px; text-align:center;">
+          <div style="font-size:11px; color:#475569;">已存在跳过</div>
+          <div style="font-weight:700; font-size:15px; color:#64748b; margin-top:2px;">${duplicateCount}</div>
+        </div>
+        <div style="width:105px; background:#fef2f2; border:1px solid #fecaca; border-radius:var(--radius-sm); padding:10px 8px; text-align:center;">
+          <div style="font-size:11px; color:#991b1b;">格式异常</div>
+          <div style="font-weight:700; font-size:15px; color:var(--danger); margin-top:2px;">${skippedRows.length}</div>
         </div>
       </div>
   `;
+
+  if (duplicateCount > 0) {
+    html += `
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:var(--radius-sm); padding:8px 12px; margin-bottom:12px; font-size:11.5px; color:#475569; display:flex; align-items:center; gap:8px;">
+        <span style="font-size:14px;">ℹ️</span>
+        <span><b>增量上传机制：</b>检测到 ${duplicateCount} 条记录在库中已存在（同指标+批号+水平+日期+序号），将自动跳过，仅入库剩余 ${newCount} 条新增记录。</span>
+      </div>
+    `;
+  }
 
   if (skippedRows.length > 0) {
     html += `
@@ -3325,7 +3718,7 @@ function openImportPreviewModal(preview, f) {
             <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--slate-200); width:85px;">日期</th>
             <th style="padding:6px 8px; text-align:right; border-bottom:1px solid var(--slate-200); width:75px;">测定值</th>
             <th style="padding:6px 8px; text-align:center; border-bottom:1px solid var(--slate-200); width:50px;">序号</th>
-            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--slate-200); width:90px;">预检状态</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--slate-200); width:95px;">增量预检</th>
           </tr>
         </thead>
         <tbody>
@@ -3336,22 +3729,25 @@ function openImportPreviewModal(preview, f) {
   } else {
     const displayRows = okRows.slice(0, 100);
     for (const r of displayRows) {
+      const isDup = !!r.is_duplicate;
       html += `
-        <tr style="border-bottom:1px solid var(--slate-100);">
+        <tr style="border-bottom:1px solid var(--slate-100); ${isDup ? 'background:#f8fafc; color:#94a3b8;' : ''}">
           <td style="padding:5px 8px; color:var(--slate-400);">#${r.original_row_no}</td>
           <td style="padding:5px 8px;">${escapeHtml(r.project_name)}</td>
           <td style="padding:5px 8px;">${escapeHtml(r.test_item_name)}</td>
           <td style="padding:5px 8px; text-align:center;"><span style="font-weight:600; color:${r.level==='H'?'var(--danger)':'var(--primary)'};">${escapeHtml(r.level)}</span></td>
           <td style="padding:5px 8px;">${escapeHtml(r.lot)}</td>
           <td style="padding:5px 8px; font-family:var(--font-mono);">${escapeHtml(r.date)}</td>
-          <td style="padding:5px 8px; text-align:right; font-weight:600; font-family:var(--font-mono);">${r.value}</td>
+          <td style="padding:5px 8px; text-align:right; font-weight:600; font-family:var(--font-mono);">${fmt3(r.value)}</td>
           <td style="padding:5px 8px; text-align:center; color:var(--slate-500);">${r.seq ?? 0}</td>
-          <td style="padding:5px 8px; color:var(--success); font-weight:600;">✓ 正常待导入</td>
+          <td style="padding:5px 8px;">
+            ${isDup ? '<span style="color:#64748b; font-weight:500;">⊘ 已存在(跳过)</span>' : '<span style="color:var(--success); font-weight:600;">＋ 待新增导入</span>'}
+          </td>
         </tr>
       `;
     }
     if (okRows.length > 100) {
-      html += `<tr><td colspan="9" style="text-align:center; padding:8px; color:var(--slate-500); background:var(--slate-50);">… 还有 ${okRows.length - 100} 行数据未展示，确认导入时将全量入库</td></tr>`;
+      html += `<tr><td colspan="9" style="text-align:center; padding:8px; color:var(--slate-500); background:var(--slate-50);">… 还有 ${okRows.length - 100} 行数据未展示，确认导入时将按增量模式入库</td></tr>`;
     }
   }
 
@@ -3364,10 +3760,12 @@ function openImportPreviewModal(preview, f) {
     <div class="form-actions" style="margin-top:14px; display:flex; justify-content:flex-end; gap:8px;">
       <button class="secondary" onclick="closeModal()">取消导入</button>
       <button ${!canImport ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''} onclick="confirmCommitImport()">
-        ${canImport ? `确认导入 ${okRows.length} 行数据` : '无法导入（无有效行）'}
+        ${canImport ? `确认增量导入 ${newCount} 行新数据` : (newCount === 0 && duplicateCount > 0 ? '所有数据已在库中（无需重复导入）' : '无法导入（无有效行）')}
       </button>
     </div>
   </div>`;
+
+  showModal(`Excel 数据增量导入预览 —— ${escapeHtml(f.name)}`, html);
 
   showModal(`Excel 数据导入预览 —— ${escapeHtml(f.name)}`, html);
 }
@@ -3449,12 +3847,14 @@ async function importXlsxNow(f) {
 
 function showImportResultModal(body, filename) {
   const imported = body.imported_count ?? 0;
+  const skippedDups = body.skipped_duplicates ?? 0;
   const skipped = body.skipped_rows || [];
   let html = `
     <div class="f2-tips" style="margin-bottom:12px;">
       <b>文件名称：</b>${escapeHtml(filename)}<br>
-      <b>成功导入：</b><span style="color:var(--success); font-weight:bold;">${imported}</span> 条数据<br>
-      <b>格式跳过：</b><span style="color:var(--danger); font-weight:bold;">${skipped.length}</span> 条数据
+      <b>成功新增导入：</b><span style="color:var(--success); font-weight:bold;">${imported}</span> 条数据<br>
+      <b>已存在自动跳过：</b><span style="color:#64748b; font-weight:bold;">${skippedDups}</span> 条数据<br>
+      <b>格式异常跳过：</b><span style="color:var(--danger); font-weight:bold;">${skipped.length}</span> 条数据
     </div>
   `;
   if (skipped.length > 0) {
@@ -3471,6 +3871,10 @@ function showImportResultModal(body, filename) {
   </div>`;
   showModal(`批量导入成功 —— ${escapeHtml(filename)}`, html);
 }
+
+// 测定值统一格式化：固定三位小数（与后端导入量化 spec §D.5 口径一致）
+// 例：40 → "40.000"；12.3456 → "12.346"
+const fmt3 = v => (v === null || v === undefined || v === "" ? "—" : Number(v).toFixed(3));
 
 function escapeHtml(s) {
   return String(s ?? "")
@@ -3564,10 +3968,10 @@ function openBatchImportModal() {
   const html = `
     <div style="min-width:420px; display:flex; flex-direction:column; gap:12px;">
       <div class="f2-tips">
-        <b>批量录入规范：</b><br>
+        <b>批量录入规范（支持增量导入）：</b><br>
         1. 必须使用标准 6 列模板（项目名、检测指标、水平、批号、日期、测定值）<br>
-        2. 支持跨水平(L/H)及同批多指标数据一次性导入并即时触发 Westgard 规则判定<br>
-        3. 如格式错误将自动跳过并生成明细清单
+        2. <b>增量追加模式</b>：库中已存在的历史记录将自动跳过，无需手动清理表格中的旧数据<br>
+        3. 支持跨水平(L/H)及同批多指标数据一次性导入并即时触发 Westgard 规则判定
       </div>
 
       <button class="secondary" id="btn-batch-template" style="width:100%; height:34px;" onclick="downloadTemplate()">

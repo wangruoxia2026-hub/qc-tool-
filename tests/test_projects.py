@@ -130,6 +130,18 @@ class TestA2CreateTestItem:
         names = sorted(i.name for i in items)
         assert names == ["D2", "D3"]
 
+    def test_验收a_按新建建档创建顺序展示(self, conn):
+        """指标展示应按新建项目向导添加/创建时的顺序（id 自增顺序），不按名称字母打乱。"""
+        pid = self._setup_project(conn)
+        # 故意按逆字母序添加：HCY -> CYS -> MET
+        create_test_item(conn, pid, name="HCY", lot="LOT1", level="L", target=10.0, sd=1.0)
+        create_test_item(conn, pid, name="CYS", lot="LOT1", level="L", target=20.0, sd=2.0)
+        create_test_item(conn, pid, name="MET", lot="LOT1", level="L", target=30.0, sd=3.0)
+
+        items = list_test_items(conn, pid)
+        item_names = [i.name for i in items]
+        assert item_names == ["HCY", "CYS", "MET"]
+
     def test_验收b_不同项目可同名(self, conn):
         p1 = create_project(conn, name="维生素 D")
         p2 = create_project(conn, name="维生素 K")
@@ -253,6 +265,84 @@ class TestA3EditDelete:
         _, ti = self._setup(conn)
         with pytest.raises(InvalidNumberFormat):
             update_test_item(conn, ti.id, sd="not a number")
+
+    def test_验收c_编辑修改指标多字段包含名称与批号人员(self, conn):
+        """验证同时更新 name、lot、target、sd、operator 等多字段正常保存无绑定错。"""
+        _, ti = self._setup(conn)
+        updated = update_test_item(
+            conn, ti.id,
+            name="D2_NEW",
+            lot="LOT2026B",
+            target=15.0,
+            sd=1.5,
+            operator="张三",
+            pre_processor="李四",
+        )
+        assert updated.name == "D2_NEW"
+        assert updated.lot == "LOT2026B"
+        assert updated.target == 15.0
+        assert updated.sd == 1.5
+        assert updated.operator == "张三"
+        assert updated.pre_processor == "李四"
+
+    # ----- 指标单位（unit）-----
+
+    def test_验收d_新建指标带临床单位_落库可回读(self, conn):
+        """新建项目向导中为指标选定临床单位后，unit 必须随指标持久化入库。"""
+        p, _ = self._setup(conn)
+        ti = create_test_item(
+            conn, p.id, name="ALT", lot="LOT1", level="L",
+            target=40.0, sd=2.0, unit="U/L",
+        )
+        assert ti.unit == "U/L"
+
+        re = get_test_item(conn, ti.id)
+        assert re.unit == "U/L"
+
+    def test_验收e_修改指标单位_持久化生效(self, conn):
+        """编辑项目向导中更换单位（如 U/L → mmol/L）后应写库并可读回。"""
+        _, ti = self._setup(conn)
+        updated = update_test_item(conn, ti.id, unit="mmol/L")
+        assert updated.unit == "mmol/L"
+
+        re = get_test_item(conn, ti.id)
+        assert re.unit == "mmol/L"
+
+    def test_验收f_多字段含单位同时更新_无参数绑定错(self, conn):
+        """同时更新 name + lot + unit + target + sd + 人员，验证 SQL 绑定数量匹配。"""
+        _, ti = self._setup(conn)
+        updated = update_test_item(
+            conn, ti.id,
+            name="WBC",
+            lot="LOT2026C",
+            unit="×10⁹/L",
+            target=6.0,
+            sd=0.5,
+            operator="王五",
+            pre_processor="赵六",
+        )
+        assert updated.name == "WBC"
+        assert updated.lot == "LOT2026C"
+        assert updated.unit == "×10⁹/L"
+        assert updated.target == 6.0
+        assert updated.sd == 0.5
+        assert updated.operator == "王五"
+        assert updated.pre_processor == "赵六"
+
+    def test_边界_单位未填_入库归一为None(self, conn):
+        """未选择单位（空白串）时，落库应归一化为 None，界面不显示空白占位。
+
+        注：create_test_item 的返回对象是内存构造体，其 unit 保留调用方原值；
+        这里断言的是"真正持久化后回读"的结果。
+        """
+        p, _ = self._setup(conn)
+        ti = create_test_item(
+            conn, p.id, name="PT", lot="LOT1", level="L",
+            target=12.0, sd=0.5, unit="   ",
+        )
+        re = get_test_item(conn, ti.id)
+        assert re is not None
+        assert re.unit is None
 
     # ----- 删除项目 -----
 

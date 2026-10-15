@@ -48,6 +48,18 @@ TEMPLATE_COLUMNS: list[str] = [
 # 也允许带"序号"列（用于同日重复测定）
 TEMPLATE_COLUMNS_WITH_SEQ: list[str] = TEMPLATE_COLUMNS + ["序号"]
 
+# 测定值小数位数：统一三位，与 spec §D.5「round(., 3) 后比较」的判定口径保持一致
+VALUE_DECIMALS = 3
+
+
+def quantize_value(raw: Any) -> float:
+    """把测定值量化为三位小数（§D.5 判定口径），解析出的 float 才入库。
+
+    Excel 里常见 12.3456789 这种浮点尾差，量化后入库可保证：
+    录入值 == 判定用值 == 展示值（三位小数）。
+    """
+    return round(float(raw), VALUE_DECIMALS)
+
 
 @dataclass
 class ImportRow:
@@ -305,7 +317,7 @@ def parse_import_xlsx_bytes(xlsx_bytes: bytes) -> ImportPlan:
             level=level,
             lot=lot,
             date=date_iso,
-            value=value_raw,
+            value=quantize_value(value_raw),
             seq=seq,
             original_row_no=original_row_no,
         ))
@@ -349,6 +361,7 @@ def import_rows(
     project_resolver: Callable[[str], Optional[int]],
     test_item_resolver: Optional[Callable[[str, str, str], Optional[int]]] = None,
     overwrite: bool = False,
+    skip_duplicates: bool = False,
 ) -> dict:
     """把 plan.ok_rows 入库。
 
@@ -359,12 +372,18 @@ def import_rows(
           检测指标名 + 项目名 + 水平 → test_item_id；返回 None 表示"指标不存在"。
           若为 None，则用默认实现：list_test_items(conn, project_id, name=name) 
           取第一个匹配 level 的 test_item。
-      overwrite: 重复时是否覆盖。默认 False → 抛 DuplicateImportRows。
+      overwrite: 重复时是否覆盖。默认 False。
+      skip_duplicates: 重复时是否自动跳过（增量导入模式）。
+                       若为 True，已存在的记录直接忽略，不报错、不覆盖，仅插入新增记录。
+                       若 overwrite=False 且 skip_duplicates=False，遇重复抛 DuplicateImportRows。
 
     流程（spec §B.2 h）：
       1. 项目解析（任一行项目不存在 → 整批拒绝）
       2. 检测指标解析（任一行指标不存在 → 整批拒绝）
-      3. 查重（test_item_id + lot + level + date + seq）→ 不 overwrite 则抛 DuplicateImportRows
+      3. 查重（test_item_id + lot + level + date + seq）：
+         - skip_duplicates=True: 过滤掉重复项，仅保留未入库的有效行进行插入；
+         - overwrite=True: 删掉旧记录后重新插入；
+         - 否则抛 DuplicateImportRows。
       4. 逐行 create_measurement（每行触发保存时合并扫描）
       5. 合并扫描"去重"：导入完成后，对本次涉及的 (test_item_id, date) 各扫一次（防重复）
     """
@@ -409,26 +428,32 @@ def import_rows(
         for r in rows
     ]
     dup_indexes = M.find_duplicates_in_import(conn, rows_with_ids)
-    if dup_indexes and not overwrite:
-        raise M.DuplicateImportRows(len(dup_indexes))
+    dup_set = set(dup_indexes)
 
-    # overwrite=True → 先删旧的
-    if dup_indexes and overwrite:
-        for i in dup_indexes:
-            r = rows_with_ids[i]
-            conn.execute(
-                "DELETE FROM measurements "
-                "WHERE test_item_id = ? AND lot = ? AND level = ? "
-                "AND date = ? AND seq = ?",
-                (r["test_item_id"], r["lot"], r["level"], r["date"], r["seq"]),
-            )
+    rows_to_insert = rows
+    if dup_indexes:
+        if skip_duplicates:
+            # 增量导入模式：跳过已存在的数据行
+            rows_to_insert = [r for idx, r in enumerate(rows) if idx not in dup_set]
+        elif overwrite:
+            # overwrite=True → 先删旧的
+            for i in dup_indexes:
+                r = rows_with_ids[i]
+                conn.execute(
+                    "DELETE FROM measurements "
+                    "WHERE test_item_id = ? AND lot = ? AND level = ? "
+                    "AND date = ? AND seq = ?",
+                    (r["test_item_id"], r["lot"], r["level"], r["date"], r["seq"]),
+                )
+        else:
+            raise M.DuplicateImportRows(len(dup_indexes))
 
     # 4. 逐行入库（每行触发保存时合并扫描）
     # 为了避免对同一 (test_item, date) 重复扫多次，先用 _skip_rescan 跳过单行触发，
     # 然后最后对本次涉及的 (test_item_id, date) 组合各扫一次
     rescan_keys: set[tuple[int, str]] = set()
     imported_count = 0
-    for r in rows:
+    for r in rows_to_insert:
         tid = test_item_id_cache[(r.test_item_name, r.project_name, r.level)]
         pid = project_id_cache[r.project_name]
         M.create_measurement(
@@ -438,6 +463,7 @@ def import_rows(
             lot=r.lot, level=r.level,
             date=r.date,
             value=r.value,
+            seq=r.seq,
             _skip_rescan=True,
         )
         rescan_keys.add((tid, r.date))
@@ -451,7 +477,177 @@ def import_rows(
         "imported_count": imported_count,
         "skipped_count": len(plan.skipped_rows),
         "duplicates": len(dup_indexes),
+        "skipped_duplicates": len(dup_indexes) if skip_duplicates else 0,
         "rescanned_keys": sorted(rescan_keys),
+    }
+
+
+def _parse_sheet_rows_for_target_sd(rows: list[tuple[Any, ...]]) -> dict[str, dict[str, Any]]:
+    """从单个 sheet 的行数据中解析 L/H 测定值并计算统计量。"""
+    import math
+
+    if not rows or len(rows) < 2:
+        return {}
+
+    raw_header = [str(c).strip() if c is not None else "" for c in rows[0]]
+    header_lower = [h.lower() for h in raw_header]
+
+    values_by_level: dict[str, list[float]] = {"L": [], "H": []}
+
+    # 判断是否为结构 1：含水平列与测定值列（例如：[水平, 测定值]）
+    level_col_idx = -1
+    value_col_idx = -1
+    for i, h in enumerate(header_lower):
+        clean_h = h.replace("_", "").replace(" ", "").replace("-", "").strip()
+        if clean_h in ("水平", "level", "浓度水平", "质控水平"):
+            level_col_idx = i
+        elif clean_h in ("测定值", "value", "数值", "浓度", "结果", "测定结果"):
+            value_col_idx = i
+
+    if level_col_idx != -1 and value_col_idx != -1:
+        for r in rows[1:]:
+            if not r or len(r) <= max(level_col_idx, value_col_idx):
+                continue
+            lvl_val = str(r[level_col_idx]).strip().upper() if r[level_col_idx] is not None else ""
+            val_raw = r[value_col_idx]
+            if lvl_val in ("L", "H") and val_raw is not None:
+                try:
+                    num = float(val_raw)
+                    values_by_level[lvl_val].append(num)
+                except (ValueError, TypeError):
+                    continue
+    else:
+        # 判断结构 2：直接包含 L 列和 H 列（例如用户模版：[质控编号, levelL, levelH]）
+        l_col = -1
+        h_col = -1
+        for i, h in enumerate(header_lower):
+            clean = h.replace("_", "").replace(" ", "").replace("-", "").strip()
+            # 排除编号/日期等干扰列
+            is_id = any(k in clean for k in ["编号", "序号", "id", "no", "seq", "日期", "date", "time", "时间", "批号", "lot", "项目", "指标"])
+            if is_id:
+                continue
+
+            # 匹配 H (高水平)
+            matched_h = clean in ("h", "levelh", "high", "水平h", "h水平", "高值", "高水平", "高浓度", "质控h", "h质控", "h测定值", "高值测定值") or (
+                ("h" in clean or "高" in clean or "high" in clean) and ("l" not in clean and "低" not in clean and "low" not in clean)
+            )
+            # 匹配 L (低水平)
+            matched_l = clean in ("l", "levell", "low", "水平l", "l水平", "低值", "低水平", "低浓度", "质控l", "l质控", "l测定值", "低值测定值") or (
+                ("l" in clean or "低" in clean or "low" in clean) and ("h" not in clean and "高" not in clean and "high" not in clean)
+            )
+
+            if matched_h and h_col == -1:
+                h_col = i
+            elif matched_l and l_col == -1:
+                l_col = i
+
+        if l_col != -1 or h_col != -1:
+            for r in rows[1:]:
+                if not r:
+                    continue
+                if l_col != -1 and len(r) > l_col and r[l_col] is not None:
+                    try:
+                        values_by_level["L"].append(float(r[l_col]))
+                    except (ValueError, TypeError):
+                        pass
+                if h_col != -1 and len(r) > h_col and r[h_col] is not None:
+                    try:
+                        values_by_level["H"].append(float(r[h_col]))
+                    except (ValueError, TypeError):
+                        pass
+        else:
+            # 兼容结构 3：无匹配表头，按纯数值列 fallback（自动跳过纯序号/日期列）
+            numeric_cols = []
+            for col_idx in range(len(raw_header)):
+                clean_h = raw_header[col_idx].lower().replace("_", "").replace(" ", "").strip()
+                if any(k in clean_h for k in ["编号", "序号", "id", "no", "seq", "日期", "date"]):
+                    continue
+                # 检测这一列是否基本为数值
+                col_nums = []
+                for r in rows[1:]:
+                    if r and len(r) > col_idx and r[col_idx] is not None:
+                        try:
+                            col_nums.append(float(r[col_idx]))
+                        except (ValueError, TypeError):
+                            pass
+                if len(col_nums) >= 2:
+                    numeric_cols.append((col_idx, col_nums))
+
+            if len(numeric_cols) >= 1:
+                values_by_level["L"].extend(numeric_cols[0][1])
+            if len(numeric_cols) >= 2:
+                values_by_level["H"].extend(numeric_cols[1][1])
+
+    res: dict[str, dict[str, Any]] = {}
+    for lvl in ("L", "H"):
+        nums = values_by_level[lvl]
+        n = len(nums)
+        if n < 2:
+            continue
+        mean_v = sum(nums) / n
+        variance = sum((x - mean_v) ** 2 for x in nums) / (n - 1)
+        sd_v = math.sqrt(variance)
+        cv_pct = (sd_v / mean_v * 100.0) if mean_v != 0 else 0.0
+        res[lvl] = {
+            "n": n,
+            "mean": round(mean_v, 3),
+            "sd": round(sd_v, 3),
+            "cv_pct": round(cv_pct, 2),
+        }
+    return res
+
+
+def calculate_target_sd_from_xlsx_bytes(xlsx_bytes: bytes) -> dict[str, Any]:
+    """从上传的 Excel 原始字节中解析测定值并测算各指标及各水平的靶值(Mean)与SD。
+
+    支持单 Sheet 与多 Sheet 工作簿：
+    - 多 Sheet 场景（需求 6）：每个 Sheet 代表一个指标（Sheet 名称即指标名称，如 ALT、AST、TBIL），
+      包含各指标的高水平和低水平测定数据。
+    - 返回结果格式：
+      {
+          "is_multi_sheet": True,
+          "sheets": {
+              "ALT": {
+                  "L": {"n": 20, "mean": 40.123, "sd": 2.145, "cv_pct": 5.35},
+                  "H": {"n": 20, "mean": 120.456, "sd": 6.234, "cv_pct": 5.17}
+              },
+              "AST": { ... }
+          },
+          "L": { ... },  # 兼顾默认活动 Sheet
+          "H": { ... }
+      }
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(_BytesIO(xlsx_bytes), data_only=True, read_only=True)
+    sheet_names = wb.sheetnames
+    if not sheet_names:
+        wb.close()
+        raise ValueError("Excel 工作簿中无有效工作表")
+
+    sheets_res: dict[str, dict[str, Any]] = {}
+    for sname in sheet_names:
+        ws = wb[sname]
+        rows = list(ws.iter_rows(values_only=True))
+        sheet_calc = _parse_sheet_rows_for_target_sd(rows)
+        if sheet_calc:
+            sheets_res[sname] = sheet_calc
+
+    wb.close()
+
+    if not sheets_res:
+        raise ValueError("未能从上传的文件中解析出足够的数据（每个水平至少需要 2 个有效测定值）")
+
+    # 取首个有效 sheet 作为顶层默认 L/H（兼容单 sheet 旧调用）
+    first_sheet_name = list(sheets_res.keys())[0]
+    default_res = sheets_res[first_sheet_name]
+
+    return {
+        "is_multi_sheet": len(sheets_res) > 1,
+        "sheet_count": len(sheets_res),
+        "sheets": sheets_res,
+        "L": default_res.get("L"),
+        "H": default_res.get("H"),
     }
 
 
@@ -475,4 +671,6 @@ __all__ = [
     "import_rows",
     # 错误报告导出
     "export_error_report",
+    # 靶值与 SD 测算
+    "calculate_target_sd_from_xlsx_bytes",
 ]

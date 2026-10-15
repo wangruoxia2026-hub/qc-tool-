@@ -10,6 +10,9 @@ matplotlib>=3.7
 # 功能 G 新增（spec V1.3 §7.2 / §11 增补：失控记录 PDF 矢量导出）
 reportlab>=4.0
 
+# 月报质控图 sheet 嵌图（openpyxl.drawing.image 依赖）
+pillow>=10.0
+
 # 测试
 pytest>=7.0
 pytest-qt>=4.2  # 备用：UI 测试可选

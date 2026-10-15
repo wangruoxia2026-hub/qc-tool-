@@ -964,9 +964,10 @@ class TestF1Investigation:
             )
             I.save_investigation(conn, measurement_id=m.id, rules=["1_3s"],
                                  checklist={"k": True})
-        # 仅 4 月
+        # 仅 4 月：04-01 有两条（1_3s 原始 + 跨日 2_2s① 补标后的 1_3s+2_2s，
+        # OOC 记录只增不删，见 measurements._retro_add_2_2s），04-15 一条 → 共 3
         rows = I.list_ooc(conn, date_from="2026-04-01", date_to="2026-04-30")
-        assert len(rows) == 2
+        assert len(rows) == 3
         assert all(r["triggered_date"].startswith("2026-04") for r in rows)
 
     # 边界：list_ooc 排序 triggered_date DESC

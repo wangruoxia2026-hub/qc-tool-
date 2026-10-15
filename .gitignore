@@ -2,3 +2,6 @@ qc.db
 __pycache__/
 *.pyc
 backup/
+.mpl_cache/
+.workbuddy/
+state.json

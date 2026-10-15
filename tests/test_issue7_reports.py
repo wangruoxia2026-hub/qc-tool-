@@ -263,7 +263,7 @@ class TestMonthlyXlsxStructure:
                     found = True
         assert found, "value 107.0 not in sheet1"
 
-    def test_two_selected_indicators_make_6_sheets(self, conn):
+    def test_two_selected_indicators_make_8_sheets(self, conn):
         ids = _seed_two_items_two_levels(conn)
         # Insert 1 measurement per selected indicator
         for item in ids["items"][:2]:
@@ -282,7 +282,9 @@ class TestMonthlyXlsxStructure:
             ],
         )
         wb = load_workbook(__import__("io").BytesIO(xlsx), data_only=True)
-        assert len(wb.sheetnames) == 6  # 2 indicators × 3 sheets
+        # 2026-10-12 用户需求：每指标 4 sheet
+        # （本月原始 / 累计统计 / 去失控累计 / 质控图）
+        assert len(wb.sheetnames) == 8  # 2 indicators × 4 sheets
 
 
 # ============================================================================
@@ -940,9 +942,12 @@ class TestMonthlyXlsxNumbers:
             # fallback：用 sheet 子串去匹配
             d3_sheets = [n for n in wb.sheetnames
                          if n.startswith("D3-L") or n.startswith("D3-低")]
-        assert len(d3_sheets) == 3, \
-            f"D3-L 指标应有 3 个 sheet；实际 {wb.sheetnames!r}"
+        assert len(d3_sheets) == 4, \
+            f"D3-L 指标应有 4 个 sheet（含质控图）；实际 {wb.sheetnames!r}"
+        # 质控图 sheet 嵌入的是占位图片，检查文本"无数据"时跳过它
         for sn in d3_sheets:
+            if "质控图" in sn:
+                continue
             ws = wb[sn]
             # 找"无数据"文本
             text_values: list[str] = []

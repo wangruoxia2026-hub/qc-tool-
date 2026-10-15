@@ -7,7 +7,7 @@ tests/conftest.py for this module). They verify:
 
 - Dropdowns populate from the database (project / test_item / lot / level / month).
 - Re-selecting project clears test_item / lot / month choices.
-- ChartConfigDialog exposes 12 fields with all checked by default.
+- ChartConfigDialog exposes 6 title fields with all checked by default.
 - ChartConfigDialog can return a ChartMeta reflecting user's choices.
 - LJChartDialog._build_meta() composes a ChartMeta from dialog state.
 - _filter_months returns ordered (year, month) tuples for a given (project,
@@ -108,15 +108,17 @@ def _seed(conn: sqlite3.Connection) -> dict:
 # ---------------------------------------------------------------------------
 
 class TestChartConfigDialog:
-    """12 fields, all on by default; can return a ChartMeta."""
+    """新标题格式 6 字段，默认全开；可返回 ChartMeta（date_range 恒开）。"""
 
-    def test_default_all_12_checked(self, qapp, conn):
+    def test_default_all_6_checked(self, qapp, conn):
         from qc_tool.ui_lj_chart import ChartConfigDialog
         ids = _seed(conn)
         dlg = ChartConfigDialog(meta=LJ.make_default_meta())
         dlg.show()
-        assert dlg.meta.visible_fields == set(LJ.ALL_FIELDS), \
-            f"default should be all 12 on, got {dlg.meta.visible_fields}"
+        assert dlg.meta.visible_fields == set(LJ.TITLE_FIELDS) | {"date_range"}, (
+            f"default should be all 6 title fields + date_range on, "
+            f"got {dlg.meta.visible_fields}"
+        )
         dlg.close()
 
     def test_uncheck_one_field(self, qapp, conn):
@@ -124,8 +126,8 @@ class TestChartConfigDialog:
         dlg = ChartConfigDialog(meta=LJ.make_default_meta())
         dlg.show()
         # Toggle one off via the API
-        dlg.set_checked("manufacturer", False)
-        assert "manufacturer" not in dlg.meta.visible_fields
+        dlg.set_checked("lot", False)
+        assert "lot" not in dlg.meta.visible_fields
         dlg.close()
 
     def test_meta_property_returns_chart_meta(self, qapp, conn):
@@ -226,7 +228,8 @@ class TestLJChartDialog:
         dlg.show()
         meta = dlg._build_meta()
         assert isinstance(meta, LJ.ChartMeta)
-        assert meta.visible_fields == set(LJ.ALL_FIELDS), meta.visible_fields
+        assert meta.visible_fields == set(LJ.TITLE_FIELDS) | {"date_range"}, \
+            meta.visible_fields
         dlg.close()
 
 

@@ -5,10 +5,12 @@ Public API
 ----------
 - LJChartPoint         : one plotted point (date, value, sd_score, status enum, rules)
 - LJChartData          : everything the renderer needs
-- ChartMeta            : rendering meta (target/sd context + 12 visible fields)
-- make_default_meta    : build meta with all 12 fields visible
+- ChartMeta            : rendering meta (6 visible fields + always-on date_range)
+- make_default_meta    : build meta with all fields visible
 - compute_chart_data   : business layer -> LJChartData (no matplotlib)
 - render_lj_chart      : matplotlib -> Figure (7 lines + 3 point types + legend)
+- render_lj_chart_dual_axis : matplotlib -> Figure (L+H one chart, dual y axes,
+                              6 point styles, coincident control lines)
 - build_tooltip_text   : (date, value, sd-score, [rules]) payload for hover
 
 Design (spec §E.1-E.2 + AGENTS.md iron rule 1 + §10 15-item scope):
@@ -17,7 +19,8 @@ Design (spec §E.1-E.2 + AGENTS.md iron rule 1 + §10 15-item scope):
 3. Month scope = full calendar month of (year, month).
 4. SD=0 -> only center line + "SD = 0, control limits invalid" notice.
 5. Same day multiple seqs -> all kept; chart may x-offset them but no aggregation.
-6. No cross-level comparison chart (spec §10 item 7).
+6. L+H dual-axis chart is the 2026-10-12 second user supplement (opens spec
+   §10 item 14 by explicit user decision); single-level styles stay spec §E.1.
 7. Only matplotlib; no PyQt6 in this file (UI layer uses these APIs only).
 """
 from __future__ import annotations
@@ -39,6 +42,21 @@ matplotlib.use("Agg")  # safe default; UI layer may override
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+
+# 标题改为中文（2026-10-13 用户需求）后，matplotlib 默认字体不含 CJK 字形，
+# 桌面图/报表 PNG 需显式指定中文字体；找不到时回退默认字体（不阻断渲染）。
+try:
+    import matplotlib.font_manager as _fm
+    _installed = {f.name for f in _fm.fontManager.ttflist}
+    _cjk_font = next(
+        (f for f in ("Microsoft YaHei", "SimHei", "SimSun") if f in _installed),
+        None,
+    )
+    if _cjk_font:
+        matplotlib.rcParams["font.sans-serif"] = [_cjk_font, "DejaVu Sans"]
+except Exception:
+    pass  # 字体扫描失败不阻断图表渲染
+matplotlib.rcParams["axes.unicode_minus"] = False
 
 # Status mapping is local to this module (see _ChartStatus below).
 class _ChartStatus(str, Enum):
@@ -89,7 +107,9 @@ class LJChartData:
     date_range: tuple[str, str]    # ('YYYY-MM-DD', 'YYYY-MM-DD')
 
 
-# 12 user-facing chart fields (spec §E.2 f).
+# 12 user-facing chart fields (spec §E.2 f). 标题新格式（用户拍板 2026-10-13）
+# 只渲染其中 6 个（见 TITLE_FIELDS）；其余 5 个不再上标题，但保留在
+# ALL_FIELDS 里兼容 Web info 参数历史值。
 ALL_FIELDS: tuple[str, ...] = (
     "project_name",
     "test_item_name",
@@ -105,24 +125,37 @@ ALL_FIELDS: tuple[str, ...] = (
     "date_range",
 )
 
+# 新标题格式实际渲染的 6 个可配置字段（date_range 由 make_default_meta 恒显示）。
+TITLE_FIELDS: tuple[str, ...] = (
+    "project_name",
+    "lot",
+    "target",
+    "sd",
+    "operator",
+    "pre_processor",
+)
+
 
 @dataclass
 class ChartMeta:
-    """Rendering meta: title text composition + 12 visible fields."""
+    """Rendering meta: title text composition + visible fields.
+
+    新标题格式只渲染 TITLE_FIELDS 6 项（+恒显示的 date_range）；
+    visible_fields 里出现的历史键（如 unit/level）被忽略。
+    """
     visible_fields: set[str] = field(default_factory=lambda: set(ALL_FIELDS))
     # Optional title suffix (e.g. "SD = 0, control limits invalid")
     notice: Optional[str] = None
 
 
 def make_default_meta(visible_fields: Optional[Iterable[str]] = None) -> ChartMeta:
-    """Build ChartMeta with all 12 fields visible by default.
+    """Build ChartMeta with all title fields visible by default.
 
-    `date_range` is always a fallback field (spec §E.2 f implicitly requires
-    the user to know *which month* they're looking at); even when the user
-    toggles everything off, date_range stays on.
+    新标题格式（2026-10-13）默认全显 TITLE_FIELDS 6 项；`date_range` 恒显示
+    （spec §E.2 f 兜底：用户须知道在看哪个月），即使全关也保留。
     """
     if visible_fields is None:
-        return ChartMeta(visible_fields=set(ALL_FIELDS))
+        return ChartMeta(visible_fields=set(TITLE_FIELDS) | {"date_range"})
     fields = set(visible_fields)
     fields.add("date_range")  # always-on fallback
     return ChartMeta(visible_fields=fields)
@@ -135,23 +168,23 @@ def make_default_meta(visible_fields: Optional[Iterable[str]] = None) -> ChartMe
 def _parse_status(status_text: Optional[str]) -> Optional[_ChartStatus]:
     """Map spec §B.1 status text to _ChartStatus.
 
-    'Void' / '作废' / None -> VOID (point is kept, drawn as gray X, per issue #5
-    user choice to make voids visible on the chart with the 4th style).
+    spec §B.1 状态列字串为中文：'在控' / '警告(规则)' / '失控(规则)' / '作废'
+    （见 measurements._status_text）；同时兼容早期英文 token
+    （'InControl' / 'Warning(...)' / 'OutOfControl(...)' / 'Void'）。
+    'Void' / '作废' / None -> VOID（图表数据层会排除该行，图上不显示，spec §E.1）。
     Unknown labels fall through to IN_CONTROL (conservative default; not an
     error path).
     """
     if status_text is None:
         return _ChartStatus.VOID
     s = status_text.strip()
-    # spec §B.1 status tokens: 'InControl', 'Warning(1_2s)', 'OutOfControl(...)',
-    # 'Void' (and Chinese '作废' for legacy rows)
-    if s in ("Void", "作废", "void"):
+    if s in ("Void", "void", "作废"):
         return _ChartStatus.VOID
-    if s.startswith("OutOfControl"):
+    if s.startswith("OutOfControl") or s.startswith("失控"):
         return _ChartStatus.OUT_OF_CONTROL
-    if s.startswith("Warning"):
+    if s.startswith("Warning") or s.startswith("警告"):
         return _ChartStatus.WARNING
-    if s == "InControl":
+    if s in ("InControl", "在控"):
         return _ChartStatus.IN_CONTROL
     # Unknown / future labels: treat as in-control (not an error path)
     return _ChartStatus.IN_CONTROL
@@ -220,10 +253,8 @@ def compute_chart_data(
     date_to = f"{year:04d}-{month:02d}-{last_day:02d}"
 
     # 3. Fetch measurements within month.
-    #    NOTE: per issue #5 user decision, void rows ARE included so the
-    #    chart can render them as a 4th style (gray X). spec §B.4 still
-    #    says voids are excluded from judgment / stats; that's the
-    #    judgment layer's job, not the chart's. This module only reads.
+    #    spec §E.1（2026-10-12 用户确认）：作废点不显示 —— 数据层直接排除
+    #    作废行。作废行在判定/统计层的排除由各自模块负责，与本模块无关。
     rows = conn.execute(
         "SELECT id, date, seq, value, status, rules "
         "FROM measurements "
@@ -242,14 +273,11 @@ def compute_chart_data(
     for r in rows:
         # Map status text -> enum
         st = _parse_status(r["status"])
+        if st == _ChartStatus.VOID:
+            continue  # 作废点不显示（spec §E.1）
         v = float(r["value"])
-        # sd_score: spec §B.4 says voids do not participate in stats.
-        # We still compute the deviation for display, but mark with NaN
-        # to signal "not used in judgment" downstream consumers.
-        if sd > 0 and st != _ChartStatus.VOID:
+        if sd > 0:
             sd_score = round((v - target) / sd, ROUND_PRECISION)
-        elif st == _ChartStatus.VOID:
-            sd_score = float("nan")
         else:
             sd_score = float("nan")
         # rules JSON
@@ -336,53 +364,93 @@ _COLOR_3SD = "#c0392b"      # red
 _COLOR_IN_CTRL = "black"
 _COLOR_WARNING = "#d9a400"
 _COLOR_OOC = "#c0392b"
-_COLOR_VOID = "gray"
+
+# 双轴图专用点样式（用户需求 2026-10-12 第二次补充，取代并排双图）：
+# L 在控绿实心圆 / 警告黄实心圆 / 失控红实心圆；
+# H 在控蓝实心三角 / 警告黄实心三角 / 失控红实心三角。
+# 单水平图样式保持 spec §E.1（在控黑圆点 / 警告黄三角 / 失控红圆）。
+_COLOR_IN_CTRL_L = "#1f7a1f"   # green filled circle (L in-control)
+_COLOR_IN_CTRL_H = "#1f5fa3"   # blue filled triangle (H in-control)
+
+# 双轴图可见 SD 跨度封顶（用户需求 2026-10-13）：
+# 数据出现极端离群值时 y 轴最多撑到 ±4SD，控制限不被压缩；
+# 超出 ±4SD 的点钉在上下边缘并标注实际值（与 Web 单图行为一致）。
+_DUAL_SPAN_CAP_SD = 4.0
+
+_DUAL_POINT_STYLE = {
+    "L": {
+        _ChartStatus.IN_CONTROL: ("o", _COLOR_IN_CTRL_L),
+        _ChartStatus.WARNING: ("o", _COLOR_WARNING),
+        _ChartStatus.OUT_OF_CONTROL: ("o", _COLOR_OOC),
+    },
+    "H": {
+        _ChartStatus.IN_CONTROL: ("^", _COLOR_IN_CTRL_H),
+        _ChartStatus.WARNING: ("^", _COLOR_WARNING),
+        _ChartStatus.OUT_OF_CONTROL: ("^", _COLOR_OOC),
+    },
+}
 
 _NO_DATA_MSG = "No Data"
 
 
 def _build_title_lines(data: LJChartData, meta: ChartMeta) -> list[str]:
-    """Compose chart title lines honoring meta.visible_fields (spec §E.2 f)."""
+    """Compose chart title lines honoring meta.visible_fields.
+
+    新标题格式（用户需求 2026-10-13，取代原英文 key=value 格式）：
+        项目名称+质控图（首行，渲染层字号 ×2）
+        质控品批号：…   靶值（L）=…   SD（L）=…（批号+靶值/SD 一行平铺）
+        仪器操作： / 前处理： / 时间范围：
+    只渲染 TITLE_FIELDS 6 项；可选字段为空时跳过该行；
+    date_range 恒显示（make_default_meta 兜底，spec §E.2 f）。
+    """
     v = meta.visible_fields
     lines: list[str] = []
-    main_bits: list[str] = []
 
     if "project_name" in v and data.project_name:
-        main_bits.append(data.project_name)
-    if "test_item_name" in v and data.test_item_name:
-        main_bits.append(data.test_item_name)
-    if "level" in v and data.level:
-        main_bits.append(f"Lv {data.level}")
-    if main_bits:
-        lines.append(" / ".join(main_bits))
+        lines.append(f"{data.project_name}质控图")
 
-    sub_bits: list[str] = []
-    if "test_item_short" in v and data.test_item_short:
-        sub_bits.append(f"short={data.test_item_short}")
-    if "unit" in v and data.unit:
-        sub_bits.append(f"unit={data.unit}")
-    if "manufacturer" in v and data.manufacturer:
-        sub_bits.append(f"mfr={data.manufacturer}")
+    # 批号 + 靶值/SD 合并一行平铺（用户需求 2026-10-13 第二次调整）
+    row_bits: list[str] = []
     if "lot" in v and data.lot:
-        sub_bits.append(f"lot={data.lot}")
+        row_bits.append(f"质控品批号：{data.lot}")
+    tgt_sd_bits: list[str] = []
     if "target" in v:
-        sub_bits.append(f"target={data.target:.{ROUND_PRECISION}f}")
+        tgt_sd_bits.append(f"靶值（{data.level}）={data.target:.{ROUND_PRECISION}f}")
     if "sd" in v:
-        sub_bits.append(f"sd={data.sd:.{ROUND_PRECISION}f}")
+        tgt_sd_bits.append(f"SD（{data.level}）={data.sd:.{ROUND_PRECISION}f}")
+    if tgt_sd_bits:
+        row_bits.append("   ".join(tgt_sd_bits))
+    if row_bits:
+        lines.append("   ".join(row_bits))
+
     if "operator" in v and data.operator:
-        sub_bits.append(f"op={data.operator}")
+        lines.append(f"仪器操作：{data.operator}")
     if "pre_processor" in v and data.pre_processor:
-        sub_bits.append(f"prep={data.pre_processor}")
-    if sub_bits:
-        lines.append("    ".join(sub_bits))
+        lines.append(f"前处理：{data.pre_processor}")
 
     if "date_range" in v and data.date_range:
-        lines.append(f"Range: {data.date_range[0]} ~ {data.date_range[1]}")
+        lines.append(f"时间范围：{data.date_range[0]}~{data.date_range[1]}")
 
     if meta.notice:
         lines.append(meta.notice)
 
     return lines
+
+
+def _set_styled_title(fig: Figure, ax, title_lines: list[str],
+                      fontsize: int) -> None:
+    """首行「项目名质控图」字号 ×2（用户需求 2026-10-13 第二次调整）。
+
+    首行放 fig.suptitle（大字号），其余行放 ax.set_title（常规字号）；
+    只有一行时整体用大字号放 ax。
+    """
+    if not title_lines:
+        return
+    if len(title_lines) == 1:
+        ax.set_title(title_lines[0], fontsize=fontsize * 2)
+        return
+    fig.suptitle(title_lines[0], fontsize=fontsize * 2)
+    ax.set_title("\n".join(title_lines[1:]), fontsize=fontsize)
 
 
 def _empty_figure(title_lines: list[str], message: str) -> Figure:
@@ -392,30 +460,40 @@ def _empty_figure(title_lines: list[str], message: str) -> Figure:
     ax.set_yticks([])
     for spine in ax.spines.values():
         spine.set_visible(False)
-    if title_lines:
-        fig.suptitle("\n".join(title_lines), fontsize=11)
+    _set_styled_title(fig, ax, title_lines, 11)
     ax.text(0.5, 0.5, message, ha="center", va="center",
             transform=ax.transAxes, fontsize=18, color="#888888")
     return fig
 
 
-def render_lj_chart(
-    data: LJChartData,
-    *,
-    meta: ChartMeta,
-) -> Figure:
-    """Render the Levey-Jennings chart.
+def _render_single_axes(fig: Figure, ax, data: LJChartData, *,
+                        meta: ChartMeta) -> None:
+    """Draw ONE level's LJ chart onto an existing Axes.
 
-    Returns a matplotlib.figure.Figure. Caller decides how to display / save it.
+    Shared core used by:
+    - render_lj_chart        (single level, whole figure)
+
+    Handles all three cases on the given ax:
+    1. no points  -> blank axes + centered "No Data" placeholder
+    2. sd = 0     -> center line only + notice in title (spec §9)
+    3. normal     -> 7 control lines + 4-status points + legend
+
+    Title: first line (project name) on fig.suptitle at 2x size,
+    remaining lines on ax.set_title (see _set_styled_title).
+    Callers own fig.tight_layout().
     """
     title_lines = _build_title_lines(data, meta)
 
-    # Edge: no data -> placeholder figure
+    # Case 1: no points -> placeholder on this ax
     if not data.points:
-        return _empty_figure(title_lines, _NO_DATA_MSG)
-
-    fig = Figure(figsize=(11, 6.5))
-    ax = fig.add_subplot(111)
+        ax.set_xticks([])
+        ax.set_yticks([])
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        _set_styled_title(fig, ax, title_lines, 9)
+        ax.text(0.5, 0.5, _NO_DATA_MSG, ha="center", va="center",
+                transform=ax.transAxes, fontsize=16, color="#888888")
+        return
 
     target = data.target
     sd = data.sd
@@ -453,17 +531,17 @@ def render_lj_chart(
             label=lbl,
         )
 
-    # If SD=0, append notice and bail (only center line is drawn).
+    # Case 2: SD=0 -> notice + only center line is drawn.
     if sd_zero:
         meta_local = ChartMeta(
             visible_fields=meta.visible_fields,
             notice=(meta.notice or "SD = 0, control limits invalid"),
         )
         title_lines = _build_title_lines(data, meta_local)
-        fig.suptitle("\n".join(title_lines), fontsize=11)
+        _set_styled_title(fig, ax, title_lines, 9)
 
         # Still plot the points so user sees they exist.
-        for x, y, p in zip(xs, ys, data.points):
+        for x, y in zip(xs, ys):
             ax.plot(x, y, marker="o", color=_COLOR_IN_CTRL, markersize=6)
         ax.set_xlabel("point index")
         ax.set_ylabel("value")
@@ -476,18 +554,15 @@ def render_lj_chart(
                    markerfacecolor=_COLOR_IN_CTRL, markersize=7, label="InControl"),
         ]
         ax.legend(handles=legend_handles, loc="upper right", fontsize=9)
-        fig.tight_layout()
-        return fig
+        return
 
-    # Plot points by status — 4 styles (issue #5 user decision):
-    # in-control (black o), warning (yellow ^), out-of-control (red o),
-    # void (gray X). Render each status in its own loop so the legend
-    # entry per style still maps 1:1 to the actual markers on the chart.
+    # Case 3: normal — plot points by status — 3 styles (spec §E.1):
+    # in-control (black o), warning (yellow ^), out-of-control (red o).
+    # 作废行已在数据层排除，不绘制。
     style_by_status = {
         _ChartStatus.IN_CONTROL:    ("o", _COLOR_IN_CTRL,  "InControl"),
         _ChartStatus.WARNING:       ("^", _COLOR_WARNING,  "Warning"),
         _ChartStatus.OUT_OF_CONTROL: ("o", _COLOR_OOC,      "OutOfControl"),
-        _ChartStatus.VOID:          ("x", _COLOR_VOID,     "Void"),
     }
     for x, y, p in zip(xs, ys, data.points):
         marker, color, _ = style_by_status.get(
@@ -500,7 +575,7 @@ def render_lj_chart(
     # Axes / labels
     ax.set_xlabel("Date")
     ax.set_ylabel("Measured value")
-    ax.set_title("\n".join(title_lines), fontsize=10)
+    _set_styled_title(fig, ax, title_lines, 9)
     ax.set_xticks(xs)
     ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=7)
 
@@ -513,7 +588,7 @@ def render_lj_chart(
 
     ax.grid(True, alpha=0.25)
 
-    # Custom legend (lines + 4 point types)
+    # Custom legend (lines + 3 point types)
     legend_handles = [
         Line2D([0], [0], color=_COLOR_CENTER, lw=1.5, label="Center"),
         Line2D([0], [0], color=_COLOR_1SD, linestyle="--", lw=1.2, label="+1SD"),
@@ -525,11 +600,261 @@ def render_lj_chart(
                markerfacecolor=_COLOR_WARNING, markersize=9, label="Warning"),
         Line2D([0], [0], marker="o", color="w",
                markerfacecolor=_COLOR_OOC, markersize=8, label="OutOfControl"),
-        Line2D([0], [0], marker="x", color="w",
-               markerfacecolor=_COLOR_VOID, markeredgecolor=_COLOR_VOID,
-               markersize=9, label="Void"),
     ]
     ax.legend(handles=legend_handles, loc="upper right", fontsize=9)
+
+
+def render_lj_chart(
+    data: LJChartData,
+    *,
+    meta: ChartMeta,
+) -> Figure:
+    """Render the Levey-Jennings chart (single level).
+
+    Returns a matplotlib.figure.Figure. Caller decides how to display / save it.
+    """
+    title_lines = _build_title_lines(data, meta)
+
+    # Edge: no data -> placeholder figure
+    if not data.points:
+        return _empty_figure(title_lines, _NO_DATA_MSG)
+
+    fig = Figure(figsize=(11, 6.5))
+    ax = fig.add_subplot(111)
+    _render_single_axes(fig, ax, data, meta=meta)
+    fig.tight_layout()
+    return fig
+
+
+def _dual_span_sd(data: LJChartData) -> Optional[float]:
+    """一侧的最大 |SD 偏离| + 0.5 边距（下限 3.5）；无可用刻度时返回 None。"""
+    if data.sd <= 0 or not data.points:
+        return None
+    k = max(abs(p.sd_score) for p in data.points if p.sd_score == p.sd_score)
+    return max(3.5, k + 0.5)
+
+
+def _dual_title_lines(data_l: LJChartData, data_h: LJChartData,
+                      meta: ChartMeta) -> list[str]:
+    """双轴图标题（新格式，用户需求 2026-10-13 + 一行平铺第二次调整）。
+
+    首行=项目名+质控图（渲染层字号 ×2）；
+    批号 + 靶值（L）/SD（L）+ 靶值（H）/SD（H）合并一行平铺；
+    仪器操作/前处理 L/H 相同→一行，不同→（L）（H）两行；时间范围独立一行。
+    """
+    v = meta.visible_fields
+    lines: list[str] = []
+
+    if "project_name" in v and data_l.project_name:
+        lines.append(f"{data_l.project_name}质控图")
+
+    def _paired(label: str, lv: Optional[str], hv: Optional[str],
+                checked: bool) -> list[str]:
+        """相同→一行；不同→（L）（H）两行；一侧为空→只显示非空侧。"""
+        if not checked:
+            return []
+        if lv and hv:
+            if lv == hv:
+                return [f"{label}：{lv}"]
+            return [f"{label}（L）：{lv}", f"{label}（H）：{hv}"]
+        if lv:
+            return [f"{label}（L）：{lv}"]
+        if hv:
+            return [f"{label}（H）：{hv}"]
+        return []
+
+    # 批号 + 左右两水平靶值/SD 合并一行平铺（2026-10-13 第二次调整）
+    row_bits: list[str] = []
+    if "lot" in v:
+        if data_l.lot and data_h.lot:
+            if data_l.lot == data_h.lot:
+                row_bits.append(f"质控品批号：{data_l.lot}")
+            else:
+                row_bits.append(f"质控品批号（L）：{data_l.lot}    "
+                                f"质控品批号（H）：{data_h.lot}")
+        elif data_l.lot:
+            row_bits.append(f"质控品批号（L）：{data_l.lot}")
+        elif data_h.lot:
+            row_bits.append(f"质控品批号（H）：{data_h.lot}")
+    for side, d in (("L", data_l), ("H", data_h)):
+        bits: list[str] = []
+        if "target" in v:
+            bits.append(f"靶值（{side}）={d.target:.{ROUND_PRECISION}f}")
+        if "sd" in v:
+            bits.append(f"SD（{side}）={d.sd:.{ROUND_PRECISION}f}")
+        if bits:
+            row_bits.append("   ".join(bits))
+    if row_bits:
+        lines.append("   ".join(row_bits))
+
+    lines += _paired("仪器操作", data_l.operator, data_h.operator,
+                     "operator" in v)
+    lines += _paired("前处理", data_l.pre_processor, data_h.pre_processor,
+                     "pre_processor" in v)
+
+    if "date_range" in v and data_l.date_range:
+        lines.append(f"时间范围：{data_l.date_range[0]}~{data_l.date_range[1]}")
+
+    if meta.notice:
+        lines.append(meta.notice)
+
+    return lines
+
+
+def render_lj_chart_dual_axis(
+    data_l: LJChartData,
+    data_h: LJChartData,
+    *,
+    meta: ChartMeta,
+) -> Figure:
+    """Render L and H levels on ONE chart with dual y axes.
+
+    用户需求（2026-10-12 第二次补充，取代并排双图；spec §10 第 14 条
+    经用户拍板开放）：
+    - 左 y 轴 = L 水平测定值，右 y 轴 = H 水平测定值，横轴 = 检测日期；
+    - 两侧各 7 条控制限（靶值绿实线、±1SD 绿虚线、±2SD 黄虚线、
+      ±3SD 红实线），左右必须重合；
+    - 点样式：L 在控绿实心圆 / 警告黄实心圆 / 失控红实心圆；
+      H 在控蓝实心三角 / 警告黄实心三角 / 失控红实心三角。
+
+    重合实现：两轴 ylim 各取"本水平靶值 ± M×本水平 SD"，M = 两侧
+    max(|SD 偏离|+0.5, 3.5) 取大，对称映射到同一像素范围 →
+    同一 k·SD 线在左右两轴天然落到同一高度。
+
+    - 一侧无点 -> 该侧只画控制限；
+    - 一侧 SD=0 -> 该侧仅画中心线（与对侧中心线重合）+ 标题提示；
+    - 两侧均无点 -> No Data 占位图；
+    - 横轴同日 L/H 逐点配对同 x：该日 L、H 各自按（seq, measurement_id）
+      排序后，第 i 个 L 点与第 i 个 H 点共用第 i 个横位（2026-10-13
+      用户第四次调整）；日期刻度居该日组中点。
+    """
+    title_lines = _dual_title_lines(data_l, data_h, meta)
+
+    # 两侧都无点 -> 占位图
+    if not data_l.points and not data_h.points:
+        return _empty_figure(title_lines, _NO_DATA_MSG)
+
+    # SD=0 提示（按侧标注）
+    sd_zero_sides = [d.level for d in (data_l, data_h) if d.sd == 0]
+    if sd_zero_sides:
+        title_lines = title_lines + [
+            " / ".join(f"{lv} SD = 0, control limits invalid"
+                       for lv in sd_zero_sides)
+        ]
+
+    fig = Figure(figsize=(11, 6.5))
+    ax_l = fig.add_subplot(111)
+    ax_h = ax_l.twinx()
+
+    # ---- y 轴归一化（重合的关键）----
+    m_l = _dual_span_sd(data_l)
+    m_h = _dual_span_sd(data_h)
+    # 可见跨度封顶 ±4SD：极端离群点不压缩控制限（超限点钉边 + 标注）
+    M = min(max(m_l if m_l is not None else 3.5,
+                m_h if m_h is not None else 3.5),
+            _DUAL_SPAN_CAP_SD)
+    ref_l = data_l.sd if data_l.sd > 0 else (data_h.sd if data_h.sd > 0 else 1.0)
+    ref_h = data_h.sd if data_h.sd > 0 else (data_l.sd if data_l.sd > 0 else 1.0)
+    ax_l.set_ylim(data_l.target - M * ref_l, data_l.target + M * ref_l)
+    ax_h.set_ylim(data_h.target - M * ref_h, data_h.target + M * ref_h)
+
+    # ---- 横轴：同日 L/H 逐点配对同 x（2026-10-13 用户第四次调整） ----
+    # 每日期一组横位：该日 L、H 各自按（seq, measurement_id）排序后，
+    # 第 i 个 L 点与第 i 个 H 点共用第 i 个横位；日期刻度居该组中点。
+    lpts_by_date: dict[str, list[LJChartPoint]] = {}
+    hpts_by_date: dict[str, list[LJChartPoint]] = {}
+    for p in data_l.points:
+        lpts_by_date.setdefault(p.date, []).append(p)
+    for p in data_h.points:
+        hpts_by_date.setdefault(p.date, []).append(p)
+    for pts in list(lpts_by_date.values()) + list(hpts_by_date.values()):
+        pts.sort(key=lambda p: (p.seq, p.measurement_id))
+    dates = sorted(set(lpts_by_date) | set(hpts_by_date))
+    x_by_id: dict[int, int] = {}
+    date_center: dict[str, float] = {}
+    pos = 1
+    for d in dates:
+        lps = lpts_by_date.get(d, [])
+        hps = hpts_by_date.get(d, [])
+        n = max(len(lps), len(hps))
+        for i, p in enumerate(lps):
+            x_by_id[p.measurement_id] = pos + i
+        for i, p in enumerate(hps):
+            x_by_id[p.measurement_id] = pos + i
+        date_center[d] = pos + (n - 1) / 2
+        pos += n
+
+    # ---- 每侧在自己的轴上画控制限 + 点 ----
+    for ax, d in ((ax_l, data_l), (ax_h, data_h)):
+        if d.sd == 0:
+            ax.axhline(d.target, color=_COLOR_CENTER, linestyle="-",
+                       linewidth=1.2, alpha=0.85, label="Center")
+        else:
+            for k, color, ls, lbl in [
+                (-3, _COLOR_3SD, "-", "-3SD"),
+                (-2, _COLOR_2SD, "--", "-2SD"),
+                (-1, _COLOR_1SD, "--", "-1SD"),
+                (0, _COLOR_CENTER, "-", "Center"),
+                (1, _COLOR_1SD, "--", "+1SD"),
+                (2, _COLOR_2SD, "--", "+2SD"),
+                (3, _COLOR_3SD, "-", "+3SD"),
+            ]:
+                ax.axhline(d.target + k * d.sd, color=color, linestyle=ls,
+                           linewidth=1.2, alpha=0.85, label=lbl)
+        styles = _DUAL_POINT_STYLE.get(d.level, _DUAL_POINT_STYLE["L"])
+        default_style = styles[_ChartStatus.IN_CONTROL]
+        for p in d.points:
+            x = x_by_id[p.measurement_id]
+            marker, color = styles.get(p.status, default_style)
+            y = p.value
+            pin_label: Optional[str] = None
+            if d.sd > 0:
+                # 超 ±4SD 的点钉在上下边缘 + 标注实际值（tooltip 仍为真实数据）
+                y_top = d.target + _DUAL_SPAN_CAP_SD * d.sd
+                y_bot = d.target - _DUAL_SPAN_CAP_SD * d.sd
+                if p.value > y_top:
+                    pin_label, y = f"↑{p.value:.3f}", y_top
+                elif p.value < y_bot:
+                    pin_label, y = f"↓{p.value:.3f}", y_bot
+            ax.plot(x, y, marker=marker, color=color, markersize=8,
+                    markeredgecolor="black", markeredgewidth=0.4)
+            if pin_label is not None:
+                ax.text(x, y, pin_label, fontsize=7, ha="center",
+                        va="bottom" if "↑" in pin_label else "top",
+                        color=color)
+
+    # ---- 共享 X 轴 + 两侧 y 标签（日期刻度居各组中点） ----
+    x_labels = dates
+    xs = [date_center[d] for d in dates]
+    ax_l.set_xticks(xs)
+    ax_l.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=7)
+    ax_l.set_xlabel("Date")
+    ax_l.set_ylabel(f"Measured value ({data_l.level})")
+    ax_h.set_ylabel(f"Measured value ({data_h.level})")
+    _set_styled_title(fig, ax_l, title_lines, 9)
+    ax_l.grid(True, alpha=0.25)
+
+    # ---- 图例：控制限 4 条 + 六种点样式 ----
+    legend_handles = [
+        Line2D([0], [0], color=_COLOR_CENTER, lw=1.5, label="Center"),
+        Line2D([0], [0], color=_COLOR_1SD, linestyle="--", lw=1.2, label="±1SD"),
+        Line2D([0], [0], color=_COLOR_2SD, linestyle="--", lw=1.2, label="±2SD"),
+        Line2D([0], [0], color=_COLOR_3SD, linestyle="-", lw=1.2, label="±3SD"),
+        Line2D([0], [0], marker="o", color="w",
+               markerfacecolor=_COLOR_IN_CTRL_L, markersize=8, label="L InControl"),
+        Line2D([0], [0], marker="o", color="w",
+               markerfacecolor=_COLOR_WARNING, markersize=8, label="L Warning"),
+        Line2D([0], [0], marker="o", color="w",
+               markerfacecolor=_COLOR_OOC, markersize=8, label="L OutOfControl"),
+        Line2D([0], [0], marker="^", color="w",
+               markerfacecolor=_COLOR_IN_CTRL_H, markersize=9, label="H InControl"),
+        Line2D([0], [0], marker="^", color="w",
+               markerfacecolor=_COLOR_WARNING, markersize=9, label="H Warning"),
+        Line2D([0], [0], marker="^", color="w",
+               markerfacecolor=_COLOR_OOC, markersize=9, label="H OutOfControl"),
+    ]
+    ax_l.legend(handles=legend_handles, loc="upper right",
+                fontsize=7.5, ncol=2)
     fig.tight_layout()
     return fig
 
@@ -537,11 +862,11 @@ def render_lj_chart(
 __all__ = [
     # data
     "LJChartPoint", "LJChartData", "ChartMeta",
-    "ALL_FIELDS", "make_default_meta",
+    "ALL_FIELDS", "TITLE_FIELDS", "make_default_meta",
     # ops
     "compute_chart_data", "build_tooltip_text",
     # render
-    "render_lj_chart",
+    "render_lj_chart", "render_lj_chart_dual_axis", "_render_single_axes",
     # G.3: PNG export (spec V1.3 §G.3)
     "save_png", "save_png_to_bytes",
 ]

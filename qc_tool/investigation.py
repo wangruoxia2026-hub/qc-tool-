@@ -126,6 +126,70 @@ def build_investigation_plan(
     }
 
 
+def get_ooc_checklist(
+    conn: sqlite3.Connection,
+    measurement_id: int,
+) -> Optional[dict[str, Any]]:
+    """查某条 measurement 已保存的排查记录（用户需求 2026-10-14：排查面板联动 F.1）。
+
+    返回 dict：
+      {'measurement_id', 'rules': [str, ...], 'checklist': {...}, 'conclusion': str|None}
+    checklist 保留落库原始 JSON 结构（两种历史格式之一，见 checklist_to_categories）。
+    无记录 → None。纯只读，不依赖 PyQt6。
+    """
+    row = conn.execute(
+        "SELECT rules, checklist, conclusion FROM out_of_control "
+        "WHERE measurement_id = ? ORDER BY id DESC LIMIT 1",
+        (measurement_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    try:
+        checklist = json.loads(row["checklist"]) if row["checklist"] else {}
+    except (TypeError, ValueError):
+        checklist = {}
+    try:
+        rules = json.loads(row["rules"]) if row["rules"] else []
+    except (TypeError, ValueError):
+        rules = []
+    return {
+        "measurement_id": measurement_id,
+        "rules": rules,
+        "checklist": checklist,
+        "conclusion": row["conclusion"],
+    }
+
+
+def checklist_to_categories(checklist: Any) -> dict[str, list[str]]:
+    """把落库 checklist 的两种历史格式归一为 {分类: [条目, ...]}：
+
+    - web 排查面板格式（2026-10-14）：{cat: [item, ...]}
+    - 桌面旧弹窗格式：{"<分类>_<条目>": bool}
+
+    只保留勾选为真的条目；无法归类的条目放入 "其他"。
+    """
+    out: dict[str, list[str]] = {}
+    if not isinstance(checklist, dict):
+        return out
+    for key, val in checklist.items():
+        if isinstance(val, list):
+            items = [str(x) for x in val]
+            if items:
+                out.setdefault(str(key), []).extend(items)
+            continue
+        # bool 格式："分类_条目" → 分类 / 条目
+        if not val:
+            continue
+        key_s = str(key)
+        if "_" in key_s:
+            cat, _, item = key_s.partition("_")
+            if cat and item:
+                out.setdefault(cat, []).append(item)
+                continue
+        out.setdefault("其他", []).append(key_s)
+    return out
+
+
 def save_investigation(
     conn: sqlite3.Connection,
     *,
@@ -225,6 +289,8 @@ def list_ooc(
 
 __all__ = [
     "build_investigation_plan",
+    "get_ooc_checklist",
+    "checklist_to_categories",
     "save_investigation",
     "list_ooc",
 ]

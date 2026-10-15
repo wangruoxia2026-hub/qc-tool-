@@ -173,6 +173,7 @@ def monthly_has_data(
 _SHEET1_NAME = "{label} - 本月原始"
 _SHEET2_NAME = "{label} - 累计统计"
 _SHEET3_NAME = "{label} - 去失控累计"
+_SHEET4_NAME = "{label} - 质控图"
 # Excel sheet 名最长 31 字符
 _SHEET_NAME_MAX = 31
 
@@ -289,19 +290,20 @@ def _write_sheet2_累计统计(
     lot: str,
     level: str,
 ) -> None:
-    """G.1 sheet 2: 累计统计（建库日 ~ 上一自然月最后一天）。"""
+    """G.1 sheet 2: 累计统计（第一条质控数据 ~ 上一自然月最后一天，含失控点）。"""
     sheet_name = _truncate_sheet_name(_SHEET2_NAME.format(label=label))
     ws = wb.create_sheet(sheet_name)
     headers = ["N", "均值", "SD", "CV%", "区间说明"]
     for i, h in enumerate(headers, start=1):
         ws.cell(row=1, column=i, value=h)
     _fill_header_row(ws, headers)
-    # 复用 §C 累计统计
+    # 复用 §C 累计统计；sheet2 保持"含失控"语义 → 显式 exclude_ooc=False
     stats = S.compute_cumulative_stats(
         conn, test_item_id=test_item_id, lot=lot, level=level,
+        exclude_ooc=False,
     )
     # 区间说明
-    interval = _describe_cumulative_range(conn, test_item_id)
+    interval = _describe_cumulative_range(conn, test_item_id, lot, level)
     ws.cell(row=2, column=5, value=interval)
     if stats.n == 0:
         ws.cell(row=2, column=1, value=_NO_DATA_TEXT)
@@ -324,49 +326,23 @@ def _write_sheet3_去失控累计(
     lot: str,
     level: str,
 ) -> None:
-    """G.1 sheet 3: 去失控累计（排除 OutOfControl* + Void，保留 InControl + Warning*）。"""
+    """G.1 sheet 3: 去失控累计（第一条质控数据 ~ 上一自然月最后一天，排除失控 + 作废）。"""
     sheet_name = _truncate_sheet_name(_SHEET3_NAME.format(label=label))
     ws = wb.create_sheet(sheet_name)
     headers = ["N", "均值", "SD", "CV%", "范围说明"]
     for i, h in enumerate(headers, start=1):
         ws.cell(row=1, column=i, value=h)
     _fill_header_row(ws, headers)
-    # 自定义 SQL：取建库日 ~ 上一自然月最后一天，排除失控 + 作废
-    ti_row = conn.execute(
-        "SELECT created_at FROM test_items WHERE id = ?", (test_item_id,)
-    ).fetchone()
-    today = date.today()
-    last_prev = S._last_day_of_prev_month(today)
-    if ti_row is None or ti_row["created_at"] is None:
-        ws.cell(row=2, column=1, value=_NO_DATA_TEXT)
-        return
-    try:
-        created_d = S._parse_iso_date(ti_row["created_at"])
-    except ValueError:
-        ws.cell(row=2, column=1, value=_NO_DATA_TEXT)
-        return
-    if created_d > last_prev:
-        ws.cell(row=2, column=1, value=_NO_DATA_TEXT)
-        ws.cell(row=2, column=5, value="建库日晚于上一自然月最后一天，无累计数据")
-        return
-    rows = conn.execute(
-        "SELECT value FROM measurements "
-        "WHERE test_item_id = ? AND lot = ? AND level = ? "
-        "  AND date >= ? AND date <= ? "
-        "  AND (status IS NULL OR status = '' "
-        "       OR status = 'InControl' OR status LIKE 'Warning%') "
-        "ORDER BY date, seq, id",
-        (test_item_id, lot, level,
-         created_d.isoformat(), last_prev.isoformat()),
-    ).fetchall()
-    vals = [float(r["value"]) for r in rows]
+    # 复用 §C 累计统计（默认 exclude_ooc=True：刨失控、保留警告、排除作废）
+    stats = S.compute_cumulative_stats(
+        conn, test_item_id=test_item_id, lot=lot, level=level,
+    )
+    interval = _describe_cumulative_range(conn, test_item_id, lot, level)
     ws.cell(row=2, column=5,
-            value=f"建库日~上一自然月最后一天（{created_d} ~ {last_prev}），"
-                  f"已排除'失控'与'作废'")
-    if not vals:
+            value=f"{interval}，已排除'失控'与'作废'")
+    if stats.n == 0:
         ws.cell(row=2, column=1, value=_NO_DATA_TEXT)
         return
-    stats = S.compute_stats_from_values(vals)
     ws.cell(row=2, column=1, value=stats.n)
     if stats.mean is not None:
         ws.cell(row=2, column=2, value=round(stats.mean, S.ROUND_PRECISION))
@@ -377,22 +353,86 @@ def _write_sheet3_去失控累计(
 
 
 def _describe_cumulative_range(
-    conn: sqlite3.Connection, test_item_id: int,
+    conn: sqlite3.Connection,
+    test_item_id: int,
+    lot: str,
+    level: str,
 ) -> str:
-    ti_row = conn.execute(
-        "SELECT created_at FROM test_items WHERE id = ?", (test_item_id,)
-    ).fetchone()
+    """累计区间说明（2026-10-13 用户裁定：起点 = 第一条质控数据日期）。"""
     today = date.today()
     last_prev = S._last_day_of_prev_month(today)
-    if ti_row is None or ti_row["created_at"] is None:
-        return "无建库日"
-    try:
-        created_d = S._parse_iso_date(ti_row["created_at"])
-    except ValueError:
-        return "建库日格式异常"
-    if created_d > last_prev:
-        return f"建库日 {created_d} 晚于上一自然月最后一天 {last_prev}，无累计数据"
-    return f"建库日 {created_d} ~ 上一自然月最后一天 {last_prev}（不含当月）"
+    start_s = S.first_data_date(conn, test_item_id, lot, level)
+    if start_s is None:
+        return "无质控数据"
+    if start_s > last_prev.isoformat():
+        return (f"第一条质控数据 {start_s} 晚于上一自然月最后一天 "
+                f"{last_prev}，无累计数据")
+    return f"第一条质控数据 {start_s} ~ 上一自然月最后一天 {last_prev}（不含当月）"
+
+
+def _write_sheet4_质控图(
+    wb: Workbook,
+    conn: sqlite3.Connection,
+    *,
+    label: str,
+    project_name: str,
+    test_item_name: str,
+    level: str,
+    lot: str,
+    year: int,
+    month: int,
+) -> None:
+    """G.1 sheet 4: 质控图（用户需求 2026-10-12 第二次补充）。
+
+    - 同指标名同批号存在 L+H 两水平 → 嵌入【一图双 y 轴】
+      （render_lj_chart_dual_axis，左轴 L、右轴 H，控制限重合；
+      spec §10 第 14 条经用户拍板开放）。
+    - 只有单水平 → 嵌入单水平图（render_lj_chart）。
+    - 该月无数据 → 嵌入占位图（各渲染函数内置 "No Data" 处理）。
+    """
+    # 延迟导入：openpyxl 嵌图依赖 Pillow；lj_chart 依赖 matplotlib
+    from openpyxl.drawing.image import Image as XlsxImage
+    from . import lj_chart as LJ
+
+    sheet_name = _truncate_sheet_name(_SHEET4_NAME.format(label=label))
+    ws = wb.create_sheet(sheet_name)
+    ws.cell(row=1, column=1,
+            value=f"{project_name} · {test_item_name} · 批号 {lot} · "
+                  f"{year:04d}-{month:02d} 质控图（双 y 轴：左 L，右 H）")
+
+    pid = _resolve_project(conn, project_name)
+    meta = LJ.make_default_meta()
+
+    sibling = conn.execute(
+        "SELECT level FROM test_items "
+        "WHERE project_id = ? AND name = ? AND lot = ? AND level != ? LIMIT 1",
+        (pid, test_item_name, lot, level),
+    ).fetchone()
+
+    if sibling is not None:
+        # 双水平：直接查 L / H 两水平（sibling 存在保证两水平都在）
+        data_l = LJ.compute_chart_data(
+            conn, project_id=pid, test_item_name=test_item_name,
+            lot=lot, level="L", year=year, month=month,
+        )
+        data_h = LJ.compute_chart_data(
+            conn, project_id=pid, test_item_name=test_item_name,
+            lot=lot, level="H", year=year, month=month,
+        )
+        fig = LJ.render_lj_chart_dual_axis(data_l, data_h, meta=meta)
+        disp_w, disp_h = 880, 520   # 11:6.5 比例
+    else:
+        data = LJ.compute_chart_data(
+            conn, project_id=pid, test_item_name=test_item_name,
+            lot=lot, level=level, year=year, month=month,
+        )
+        fig = LJ.render_lj_chart(data, meta=meta)
+        disp_w, disp_h = 880, 520    # 11:6.5 比例
+
+    png_bytes = LJ.save_png_to_bytes(fig, dpi=150)
+    img = XlsxImage(io.BytesIO(png_bytes))
+    img.width, img.height = disp_w, disp_h
+    ws.add_image(img, "A3")
 
 
 def build_monthly_report_xlsx(
@@ -441,6 +481,13 @@ def build_monthly_report_xlsx(
             wb, conn,
             label=label, test_item_id=ti_id,
             lot=ti_row["lot"], level=ti_row["level"],
+        )
+        _write_sheet4_质控图(
+            wb, conn,
+            label=label, project_name=project_name,
+            test_item_name=ti_row["name"], level=ti_row["level"],
+            lot=ti_row["lot"],
+            year=year, month=month,
         )
     buf = io.BytesIO()
     wb.save(buf)

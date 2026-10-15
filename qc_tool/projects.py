@@ -643,7 +643,7 @@ def update_test_item(
         raise LookupError(f"test_item {test_item_id} 不存在")
 
     allowed = {
-        "short", "unit", "manufacturer", "lot", "level",
+        "name", "short", "unit", "manufacturer", "lot", "level",
         "target", "sd", "expiry_date",
         "source", "operator", "pre_processor",
     }
@@ -656,6 +656,8 @@ def update_test_item(
             sets.append(f"{k} = ?")
             vals.append(None)
             continue
+        if k == "name":
+            vals.append(_ensure_nonempty(v, ProjectNameEmpty))
         if k == "target":
             vals.append(_ensure_positive_number(v, "靶值"))
         elif k == "sd":

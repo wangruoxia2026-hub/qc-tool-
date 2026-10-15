@@ -199,12 +199,8 @@ class TestComputeChartData:
         dates = sorted({p.date for p in data.points})
         assert dates == ["2026-04-15"], dates
 
-    def test_void_rows_now_drawn_with_4th_style(self, conn):
-        """Per issue #5 user choice: void rows ARE plotted (gray X).
-
-        spec §B.4 originally says 'voids not on chart', but user overrode
-        this for the 4-style contract. We document the choice here.
-        """
+    def test_void_rows_excluded_from_chart_data(self, conn):
+        """spec §E.1（2026-10-12 用户确认）：作废点不显示，图表数据层排除作废行。"""
         ids = _seed_basic(conn)
         _seed_with_status(
             conn, test_item_id=ids["test_item_id_l"],
@@ -219,11 +215,10 @@ class TestComputeChartData:
         )
         data = _chart_data(conn, project_id=ids["project_id"])
         dates = sorted({p.date for p in data.points})
-        assert dates == ["2026-04-01", "2026-04-02"], dates
-        # Verify status classification
+        assert dates == ["2026-04-01"], dates
+        # 作废行不再进入图表数据
         void_pts = [p for p in data.points if p.status == LJ._ChartStatus.VOID]
-        assert len(void_pts) == 1
-        assert void_pts[0].sd_score != void_pts[0].sd_score  # NaN
+        assert len(void_pts) == 0
 
     def test_name_or_lot_mismatch_returns_empty(self, conn):
         ids = _seed_basic(conn, lot="LOT1")
@@ -371,9 +366,9 @@ class TestRenderBasic:
 
 
 class TestRenderVoid:
-    """b: void rows drawn with the 4th style (gray X) per issue #5 user choice."""
+    """spec §E.1（2026-10-12 用户确认）：作废点不显示。"""
 
-    def test_void_row_drawn_with_gray_x(self, conn):
+    def test_void_row_not_drawn(self, conn):
         ids = _seed_basic(conn, target=100.0, sd=2.0)
         _seed_with_status(
             conn, test_item_id=ids["test_item_id_l"],
@@ -387,21 +382,23 @@ class TestRenderVoid:
             date="2026-04-02", value=107.0, level="L", lot="LOT1",
         )
         data = _chart_data(conn, project_id=ids["project_id"])
-        # Both rows present
-        assert {p.date for p in data.points} == {"2026-04-01", "2026-04-02"}
+        # 作废行已从图表数据排除，仅剩在控行
+        assert {p.date for p in data.points} == {"2026-04-01"}
         fig = LJ.render_lj_chart(data, meta=LJ.make_default_meta())
         ax = fig.axes[0]
-        # Count scatter markers (any non-line) — at least 2 (in-control + void)
+        # Count scatter markers (any non-line) — 只有 1 个（在控），无灰色 X
         marker_count = sum(
             1 for ln in ax.get_lines()
             if ln.get_marker() in ("o", "^", "x", "v", "s", "D", "P")
             and ln.get_label() not in ("Center", "+1SD", "-1SD", "+2SD",
                                         "-2SD", "+3SD", "-3SD")
         )
-        assert marker_count == 2, marker_count
-        # And a 'x' marker exists
-        assert any(ln.get_marker() == "x" for ln in ax.get_lines()), \
-            "no 'x' marker found on chart; void style not applied"
+        assert marker_count == 1, marker_count
+        # 无 'x' 标记，且图例不含 Void
+        assert not any(ln.get_marker() == "x" for ln in ax.get_lines()), \
+            "作废点不应以灰色 X 出现在图上"
+        legend_texts = [t.get_text() for t in ax.get_legend().get_texts()]
+        assert "Void" not in legend_texts
 
 
 class TestRenderSdZero:
@@ -449,7 +446,7 @@ class TestRenderNoData:
 
 
 class TestRenderFieldsVisibility:
-    """f: 12 fields can be toggled."""
+    """f: 新标题格式字段可见性（用户拍板 2026-10-13：6 字段 + 时间范围恒显）。"""
 
     @pytest.fixture
     def data_with_meta(self, conn):
@@ -462,14 +459,19 @@ class TestRenderFieldsVisibility:
         )
         return _chart_data(conn, project_id=ids["project_id"])
 
-    def test_default_shows_all_12_fields(self, data_with_meta):
+    def test_default_shows_all_title_fields(self, data_with_meta):
         fig = LJ.render_lj_chart(data_with_meta, meta=LJ.make_default_meta())
         blob = _figure_text_blob(fig)
-        # All 12 fields' distinguishing substrings
-        for kw in ("Vitamin D", "D2", "D2-S", "ng/mL", "Roche",
-                   "LOT1", "L", "100.000", "2.000",
-                   "Op-1", "Pre-1", "2026-04"):
+        for kw in ("Vitamin D质控图", "质控品批号：LOT1", "靶值（L）=100.000",
+                   "SD（L）=2.000", "仪器操作：Op-1", "前处理：Pre-1",
+                   "时间范围：2026-04-01~2026-04-30"):
             assert kw in blob, f"missing {kw!r} in {blob!r}"
+        # 首行「项目名质控图」独立大字号（用户需求：×2）
+        assert fig._suptitle.get_text() == "Vitamin D质控图"
+        assert fig._suptitle.get_fontsize() == 18
+        # 新格式不再显示指标名/简称/单位/厂家
+        for kw in ("D2", "D2-S", "ng/mL", "Roche"):
+            assert kw not in blob, f"unexpected {kw!r} in {blob!r}"
 
     def test_all_off_keeps_only_date_range_fallback(self, data_with_meta):
         fig = LJ.render_lj_chart(
@@ -478,17 +480,15 @@ class TestRenderFieldsVisibility:
         blob = _figure_text_blob(fig)
         for kw in ("100.000", "2.000", "Roche", "LOT1"):
             assert kw not in blob, f"unexpected {kw!r} in {blob!r}"
-        assert "2026-04" in blob
+        assert "时间范围：2026-04-01~2026-04-30" in blob
 
     def test_single_field_off(self, data_with_meta):
         meta = LJ.make_default_meta()
-        meta.visible_fields.discard("test_item_name")
+        meta.visible_fields.discard("lot")
         fig = LJ.render_lj_chart(data_with_meta, meta=meta)
         blob = _figure_text_blob(fig)
-        # 'D2' should not appear as a standalone token in the main title row;
-        # 'D2-S' (test_item_short) still does, so we check the main header line.
-        main_header = blob.split("\n")[0] if "\n" in blob else blob
-        assert "D2" not in main_header, main_header
+        assert "质控品批号" not in blob
+        assert "靶值（L）=100.000" in blob
 
 
 class TestRenderLinesCount:

@@ -58,58 +58,176 @@ class EntryForm(QWidget):
         super().__init__(parent)
         layout = QFormLayout(self)
 
+        self._items: list[P.TestItem] = []
+
         self.project_label = QLabel("（请在左侧选项目）")
         self.test_item_combo = QComboBox()
-        self.level_combo = QComboBox()
-        self.level_combo.addItems(["L", "H"])
+        self.test_item_combo.currentIndexChanged.connect(self._on_item_changed)
+
         self.lot_edit = QLineEdit("LOT1")
         self.date_edit = QDateEdit()
         self.date_edit.setCalendarPopup(True)
         self.date_edit.setDate(QDate.currentDate())
         self.date_edit.setDisplayFormat("yyyy-MM-dd")
+
+        # 1. 序号默认从 1 开始
         self.seq_spin = QDoubleSpinBox()
-        self.seq_spin.setRange(0, 999)
+        self.seq_spin.setRange(1, 999)
         self.seq_spin.setDecimals(0)
-        self.seq_spin.setValue(0)
-        self.value_spin = QDoubleSpinBox()
-        self.value_spin.setRange(0.0, 1e9)
-        self.value_spin.setDecimals(3)
-        self.value_spin.setValue(100.0)
+        self.seq_spin.setValue(1)
+
+        # 3. 高低水平测定值同时展现与输入
+        self.value_l_spin = QDoubleSpinBox()
+        self.value_l_spin.setRange(0.0, 1e9)
+        self.value_l_spin.setDecimals(3)
+        self.value_l_spin.setValue(0.0)
+
+        self.value_h_spin = QDoubleSpinBox()
+        self.value_h_spin.setRange(0.0, 1e9)
+        self.value_h_spin.setDecimals(3)
+        self.value_h_spin.setValue(0.0)
+
+        # 2. 操作人员与前处理人员下拉选择（可编辑输入）
+        self.operator_combo = QComboBox()
+        self.operator_combo.setEditable(True)
+        self.pre_processor_combo = QComboBox()
+        self.pre_processor_combo.setEditable(True)
+
         self.note_edit = QLineEdit()
 
         layout.addRow("项目：", self.project_label)
         layout.addRow("检测指标：", self.test_item_combo)
-        layout.addRow("水平：", self.level_combo)
         layout.addRow("批号：", self.lot_edit)
         layout.addRow("日期：", self.date_edit)
         layout.addRow("序号：", self.seq_spin)
-        layout.addRow("测定值：", self.value_spin)
+        layout.addRow("低水平 (L) 测定值：", self.value_l_spin)
+        layout.addRow("高水平 (H) 测定值：", self.value_h_spin)
+        layout.addRow("操作人员：", self.operator_combo)
+        layout.addRow("前处理人员：", self.pre_processor_combo)
         layout.addRow("备注：", self.note_edit)
 
     def set_project(self, project_name: str, items: list[P.TestItem]):
         self.project_label.setText(project_name)
+        self._items = items
         self.test_item_combo.clear()
-        for it in items:
-            self.test_item_combo.addItem(
-                f"{it.name} · {it.lot} · {it.level} · 靶值={it.target} SD={it.sd}",
-                userData=(it.id, it.lot, it.level, it.target, it.sd),
-            )
 
-    def values(self) -> dict:
-        data = self.test_item_combo.currentData()
-        if data is None:
+        # 按指标名称去重显示
+        names_seen = set()
+        for it in items:
+            if it.name not in names_seen:
+                names_seen.add(it.name)
+                self.test_item_combo.addItem(it.name, userData=it.name)
+
+        # 提取操作人员与前处理人员名单填入下拉框
+        ops = []
+        pps = []
+        for it in items:
+            if it.operator and it.operator.strip() and it.operator.strip() not in ops:
+                ops.append(it.operator.strip())
+            if it.pre_processor and it.pre_processor.strip() and it.pre_processor.strip() not in pps:
+                pps.append(it.pre_processor.strip())
+
+        self.operator_combo.clear()
+        for op in ops:
+            self.operator_combo.addItem(op)
+        if ops:
+            self.operator_combo.setCurrentIndex(0)
+        else:
+            self.operator_combo.setEditText("")
+
+        self.pre_processor_combo.clear()
+        for pp in pps:
+            self.pre_processor_combo.addItem(pp)
+        if pps:
+            self.pre_processor_combo.setCurrentIndex(0)
+        else:
+            self.pre_processor_combo.setEditText("")
+
+        self._on_item_changed()
+
+    def _on_item_changed(self):
+        item_name = self.test_item_combo.currentText()
+        if not item_name or not self._items:
+            return
+        siblings = [it for it in self._items if it.name == item_name]
+        if siblings:
+            self.lot_edit.setText(siblings[0].lot)
+        item_l = next((it for it in siblings if it.level == "L"), None)
+        item_h = next((it for it in siblings if it.level == "H"), None)
+        if item_l:
+            self.value_l_spin.setValue(item_l.target)
+        else:
+            self.value_l_spin.setValue(0.0)
+        if item_h:
+            self.value_h_spin.setValue(item_h.target)
+        else:
+            self.value_h_spin.setValue(0.0)
+
+    def values(self) -> list[dict] | None:
+        item_name = self.test_item_combo.currentText()
+        if not item_name or not self._items:
             return None
-        tid, lot_default, level_default, _, _ = data
-        return {
-            "test_item_id": tid,
-            "project_id": None,  # 主窗口补
-            "lot": self.lot_edit.text().strip() or lot_default,
-            "level": self.level_combo.currentText(),
-            "date": self.date_edit.date().toString("yyyy-MM-dd"),
-            "seq": int(self.seq_spin.value()),
-            "value": float(self.value_spin.value()),
-            "note": self.note_edit.text().strip() or None,
-        }
+        siblings = [it for it in self._items if it.name == item_name]
+        item_l = next((it for it in siblings if it.level == "L"), None)
+        item_h = next((it for it in siblings if it.level == "H"), None)
+
+        cur_seq = int(self.seq_spin.value())
+        lot = self.lot_edit.text().strip() or (siblings[0].lot if siblings else "LOT1")
+        date_str = self.date_edit.date().toString("yyyy-MM-dd")
+        op = self.operator_combo.currentText().strip() or None
+        pp = self.pre_processor_combo.currentText().strip() or None
+        note = self.note_edit.text().strip() or None
+
+        results = []
+        val_l = float(self.value_l_spin.value())
+        val_h = float(self.value_h_spin.value())
+
+        # 若配对了对应水平，则记录
+        if item_l is not None and val_l > 0:
+            results.append({
+                "test_item_id": item_l.id,
+                "project_id": item_l.project_id,
+                "lot": lot,
+                "level": "L",
+                "date": date_str,
+                "seq": cur_seq,
+                "value": val_l,
+                "operator": op,
+                "pre_processor": pp,
+                "note": note,
+            })
+        if item_h is not None and val_h > 0:
+            results.append({
+                "test_item_id": item_h.id,
+                "project_id": item_h.project_id,
+                "lot": lot,
+                "level": "H",
+                "date": date_str,
+                "seq": cur_seq,
+                "value": val_h,
+                "operator": op,
+                "pre_processor": pp,
+                "note": note,
+            })
+
+        # 若两个水平都为 0，但有单条项目指标，则兜底允许填入
+        if not results and siblings:
+            it = siblings[0]
+            val = val_l if it.level == "L" else val_h
+            results.append({
+                "test_item_id": it.id,
+                "project_id": it.project_id,
+                "lot": lot,
+                "level": it.level,
+                "date": date_str,
+                "seq": cur_seq,
+                "value": val,
+                "operator": op,
+                "pre_processor": pp,
+                "note": note,
+            })
+
+        return results
 
 
 # ============================================================================
@@ -117,15 +235,26 @@ class EntryForm(QWidget):
 # ============================================================================
 
 class InvestigationDialog(QDialog):
-    """spec §F.1 排查面板：按触发规则返回分类清单 + 可勾选 + conclusion。"""
+    """spec §F.1 排查面板：按触发规则返回分类清单 + 可勾选 + conclusion。
 
-    def __init__(self, parent=None, *, plan: dict, measurement_id: int):
+    prefill：可选 dict（I.get_ooc_checklist 的返回值），预选已保存的
+    排查项并回填结论——排查面板「编辑排查清单」联动 F.1 时使用。
+    """
+
+    def __init__(self, parent=None, *, plan: dict, measurement_id: int,
+                 prefill: Optional[dict] = None):
         super().__init__(parent)
         self.setWindowTitle(f"失控排查 — 规则 {','.join(plan['context']['rules'])}")
         self.resize(640, 480)
         self._measurement_id = measurement_id
         self._plan = plan
         self._checkboxes: dict[str, QCheckBox] = {}
+
+        # 已保存勾选项（两种落库格式归一为 {分类: [条目]}）
+        saved: dict[str, list[str]] = {}
+        if prefill and isinstance(prefill.get("checklist"), dict):
+            saved = I.checklist_to_categories(prefill["checklist"])
+        saved_set = {(cat, item) for cat, items in saved.items() for item in items}
 
         layout = QVBoxLayout(self)
         ctx = plan["context"]
@@ -163,6 +292,8 @@ class InvestigationDialog(QDialog):
             for item_text in cat["items"]:
                 key = f"{cat['category']}_{item_text}"
                 cb = QCheckBox(item_text)
+                if (cat["category"], item_text) in saved_set:
+                    cb.setChecked(True)
                 self._checkboxes[key] = cb
                 g_layout.addWidget(cb)
             body_layout.addWidget(group)
@@ -171,6 +302,8 @@ class InvestigationDialog(QDialog):
 
         self.conclusion_edit = QLineEdit()
         self.conclusion_edit.setPlaceholderText("处理结论（可选）")
+        if prefill and prefill.get("conclusion"):
+            self.conclusion_edit.setText(str(prefill["conclusion"]))
         layout.addWidget(QLabel("处理结论："))
         layout.addWidget(self.conclusion_edit)
 
@@ -395,38 +528,50 @@ class MainWindowB(QMainWindow):
     # ----- 按钮事件 -----
 
     def _on_save(self):
-        if self._current_project_id is None or self._current_test_item_id is None:
-            QMessageBox.information(self, "提示", "请先在左侧选项目与检测指标")
+        if self._current_project_id is None:
+            QMessageBox.information(self, "提示", "请先在左侧选项目")
             return
-        v = self.entry_form.values()
-        if v is None:
-            QMessageBox.information(self, "提示", "录入表单不完整")
+        vals = self.entry_form.values()
+        if not vals:
+            QMessageBox.information(self, "提示", "录入表单不完整或未输入测定值")
             return
-        v["project_id"] = self._current_project_id
+
+        last_m = None
+        last_v = None
         try:
-            # 日期提示（spec §9）
-            date_info = M.validate_measurement_date(v["date"])
-            if date_info["is_future"]:
-                if QMessageBox.question(
-                    self, "日期晚于今天",
-                    f"日期 {v['date']} 晚于今天，是否仍要保存？",
-                ) != QMessageBox.StandardButton.Yes:
-                    return
-            elif date_info["is_too_old"]:
-                QMessageBox.information(
-                    self, "日期较久",
-                    f"日期 {v['date']} 早于当前日期 2 年以上；继续保存。",
-                )
-            m = M.create_measurement(self.conn, **v)
+            for v in vals:
+                v["project_id"] = self._current_project_id
+                # 日期提示（spec §9）
+                date_info = M.validate_measurement_date(v["date"])
+                if date_info["is_future"]:
+                    if QMessageBox.question(
+                        self, "日期晚于今天",
+                        f"日期 {v['date']} 晚于今天，是否仍要保存？",
+                    ) != QMessageBox.StandardButton.Yes:
+                        return
+                elif date_info["is_too_old"]:
+                    QMessageBox.information(
+                        self, "日期较久",
+                        f"日期 {v['date']} 早于当前日期 2 年以上；继续保存。",
+                    )
+                m = M.create_measurement(self.conn, **v)
+                last_m = m
+                last_v = v
+
             self.conn.commit()
+            # 保存成功后序号自动递增 1
+            cur_seq = int(self.entry_form.seq_spin.value())
+            self.entry_form.seq_spin.setValue(cur_seq + 1)
         except (M.ValueMustNonNegative, M.ValueInvalidNumber) as e:
             QMessageBox.warning(self, "校验失败", str(e))
             return
-        self._refresh_measurements(self._current_test_item_id)
+
+        if self._current_test_item_id:
+            self._refresh_measurements(self._current_test_item_id)
 
         # 失控 → 弹 §F.1 排查面板
-        if m.status and m.status.startswith("失控"):
-            self._open_investigation_dialog(m, v)
+        if last_m and last_m.status and last_m.status.startswith("失控"):
+            self._open_investigation_dialog(last_m, last_v)
 
     def _on_void(self):
         row = self.measurements_table.currentRow()

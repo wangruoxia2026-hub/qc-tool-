@@ -2,137 +2,910 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>临床检验室内质控工具 V1.3 — Web 预览</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>临床检验室内质控系统 V1.3 — Web 质控工作台</title>
 <style>
-  * { box-sizing: border-box; }
-  body { margin: 0; font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 13px; background: #f0f2f5; }
-  /* ===== 顶部菜单栏 ===== */
-  .menubar { background: #2c3e50; color: white; padding: 6px 12px; display: flex; gap: 16px; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-  .menubar .title { font-weight: bold; font-size: 14px; }
-  .menubar .menu-item { cursor: pointer; padding: 4px 8px; border-radius: 3px; }
-  .menubar .menu-item:hover { background: #34495e; }
-  .menubar .lab-name { margin-left: auto; color: #f1c40f; font-size: 12px; }
+  :root {
+    --primary: #2563eb;
+    --primary-hover: #1d4ed8;
+    --primary-light: #eff6ff;
+    --primary-border: #bfdbfe;
+    
+    --slate-50: #f8fafc;
+    --slate-100: #f1f5f9;
+    --slate-200: #e2e8f0;
+    --slate-300: #cbd5e1;
+    --slate-400: #94a3b8;
+    --slate-500: #64748b;
+    --slate-600: #475569;
+    --slate-700: #334155;
+    --slate-800: #1e293b;
+    --slate-900: #0f172a;
+
+    --success: #16a34a;
+    --success-bg: #dcfce7;
+    --success-border: #bbf7d0;
+
+    --warning: #d97706;
+    --warning-bg: #fef3c7;
+    --warning-border: #fde68a;
+
+    --danger: #dc2626;
+    --danger-hover: #b91c1c;
+    --danger-bg: #fee2e2;
+    --danger-border: #fecaca;
+
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --radius-full: 9999px;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--slate-800);
+    background-color: var(--slate-100);
+    overflow: hidden;
+  }
+
+  /* ===== 顶栏 Header ===== */
+  .menubar {
+    height: 48px;
+    background: var(--slate-900);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    padding: 0 16px;
+    gap: 12px;
+    border-bottom: 1px solid var(--slate-800);
+    box-shadow: var(--shadow-sm);
+    user-select: none;
+  }
+  .menubar .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: #fff;
+    padding-right: 12px;
+    border-right: 1px solid var(--slate-700);
+  }
+  .menubar .brand-icon {
+    width: 20px;
+    height: 20px;
+    color: #60a5fa;
+  }
+  .menubar .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .menubar .menu-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: var(--radius-md);
+    color: var(--slate-300);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .menubar .menu-item:hover {
+    background: var(--slate-800);
+    color: #fff;
+  }
+  .menubar .menu-item svg {
+    width: 14px;
+    height: 14px;
+  }
+  .menubar .lab-badge {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(30, 41, 59, 0.8);
+    border: 1px solid var(--slate-700);
+    padding: 4px 10px;
+    border-radius: var(--radius-full);
+    font-size: 12px;
+  }
+  .menubar .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10b981;
+  }
+  .menubar .status-dot.pending {
+    background: #f59e0b;
+  }
+  .menubar .lab-name {
+    color: #f8fafc;
+    font-weight: 500;
+  }
 
   /* ===== 主布局 ===== */
-  .main { display: flex; height: calc(100vh - 38px); }
-  .left-panel { width: 280px; background: white; border-right: 1px solid #ddd; padding: 10px; overflow-y: auto; }
-  .center-panel { flex: 1; padding: 10px; overflow-y: auto; }
-  .right-panel { width: 380px; background: white; border-left: 1px solid #ddd; padding: 10px; overflow-y: auto; }
+  .main {
+    display: flex;
+    height: calc(100vh - 48px - 28px);
+    width: 100vw;
+  }
 
-  /* ===== 列表 ===== */
-  h3 { font-size: 13px; margin: 10px 0 4px; color: #555; }
-  .list { list-style: none; padding: 0; margin: 0; border: 1px solid #e0e0e0; border-radius: 3px; max-height: 200px; overflow-y: auto; }
-  .list li { padding: 6px 10px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
+  /* ===== 左侧栏：项目与指标树 ===== */
+  .left-panel {
+    width: 300px;
+    background: #fff;
+    border-right: 1px solid var(--slate-200);
+    display: flex;
+    flex-direction: column;
+    padding: 14px;
+    gap: 14px;
+    overflow-y: auto;
+  }
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+  .panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--slate-700);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .badge-count {
+    background: var(--slate-100);
+    color: var(--slate-600);
+    font-size: 11px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--slate-200);
+  }
+  .list {
+    list-style: none;
+    border: 1px solid var(--slate-200);
+    border-radius: var(--radius-md);
+    background: #fff;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .list li {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--slate-100);
+    cursor: pointer;
+    transition: background 0.12s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
   .list li:last-child { border-bottom: none; }
-  .list li:hover { background: #f5f5f5; }
-  .list li.active { background: #3498db; color: white; }
-  .list li .meta { color: #888; font-size: 11px; }
+  .list li:hover { background: var(--slate-50); }
+  .list li.active {
+    background: var(--primary-light);
+    border-left: 3px solid var(--primary);
+  }
+  .list li.active .title-text {
+    color: var(--primary);
+    font-weight: 600;
+  }
+  .list li .title-text {
+    color: var(--slate-800);
+    font-weight: 500;
+    font-size: 12.5px;
+  }
+  .list li .meta {
+    font-size: 11px;
+    color: var(--slate-500);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .tag-level {
+    display: inline-block;
+    padding: 0 4px;
+    border-radius: 2px;
+    font-weight: 600;
+    font-size: 10px;
+  }
+  .tag-level.L { background: #e0f2fe; color: #0284c7; }
+  .tag-level.H { background: #fce7f3; color: #db2777; }
 
-  /* ===== 表单 ===== */
-  .form { background: #fafafa; padding: 10px; border: 1px solid #e0e0e0; border-radius: 3px; margin-bottom: 10px; }
-  .form-row { display: flex; align-items: center; margin: 4px 0; }
-  .form-row label { width: 80px; color: #555; }
-  .form-row input, .form-row select { flex: 1; padding: 4px 6px; border: 1px solid #ccc; border-radius: 3px; }
-  .form-actions { margin-top: 8px; display: flex; gap: 6px; }
+  /* 检测指标卡片标题行：点击直接查看该指标 L+H 双轴质控图 */
+  .ti-title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    padding: 3px 4px;
+    margin: -3px -4px;
+    transition: background 0.15s ease;
+  }
+  .ti-title-row:hover {
+    background: #eff6ff;
+  }
+  .ti-pair-badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: #1d4ed8;
+    background: #dbeafe;
+    border-radius: 8px;
+    padding: 1px 7px;
+    white-space: nowrap;
+  }
 
-  /* ===== 按钮 ===== */
-  button { padding: 5px 10px; background: #3498db; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 12px; }
-  button:hover { background: #2980b9; }
-  button.secondary { background: #95a5a6; }
-  button.secondary:hover { background: #7f8c8d; }
-  button.danger { background: #c0392b; }
-  button.danger:hover { background: #a93226; }
+  /* 复合指标卡片内部高/低水平行 */
+  .level-sub-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 4px;
+  }
+  .level-sub-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 6px;
+    border-radius: var(--radius-sm);
+    background: #f8fafc;
+    border: 1px solid var(--slate-200);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .level-sub-row:hover {
+    background: #f1f5f9;
+    border-color: var(--slate-300);
+  }
+  .level-sub-row.active {
+    background: #eff6ff;
+    border-color: #93c5fd;
+    box-shadow: 0 0 0 1px #3b82f6 inset;
+  }
+  .level-sub-row.active .meta {
+    color: var(--slate-800);
+    font-weight: 500;
+  }
+  .level-sub-row .meta {
+    font-size: 11px;
+    color: var(--slate-600);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
 
-  /* ===== 表格 ===== */
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { border: 1px solid #e0e0e0; padding: 4px 8px; text-align: left; }
-  th { background: #ecf0f1; }
-  tr.void { color: #999; text-decoration: line-through; background: #f5f5f5; }
-  tr.out_of_control td.value, tr.out_of_control td.status { color: #c0392b; font-weight: bold; }
-  tr.warning td.value, tr.warning td.status { color: #d68910; }
-  tr.in_control td.value, tr.in_control td.status { color: #27ae60; }
+  .btn-group {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
 
-  /* ===== LJ 图区 ===== */
-  .chart-toolbar { display: flex; gap: 6px; align-items: center; padding: 6px 0; flex-wrap: wrap; }
-  .chart-toolbar select, .chart-toolbar input { padding: 3px 6px; border: 1px solid #ccc; border-radius: 3px; }
-  .chart-container { background: white; border: 1px solid #ddd; padding: 10px; border-radius: 3px; }
-  .chart-container img { max-width: 100%; display: block; }
+  /* ===== 中央：质控图与数据分析 ===== */
+  .center-panel {
+    flex: 1;
+    background: var(--slate-50);
+    padding: 14px 18px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .header-card {
+    background: #fff;
+    border: 1px solid var(--slate-200);
+    border-radius: var(--radius-lg);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: var(--shadow-sm);
+  }
+  .header-title-box {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .header-title-box h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--slate-800);
+  }
+  .target-sd-pill {
+    font-size: 11.5px;
+    color: var(--slate-600);
+    background: var(--slate-100);
+    padding: 3px 8px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--slate-200);
+  }
 
-  /* ===== 状态栏 ===== */
-  .statusbar { background: #34495e; color: white; padding: 4px 12px; font-size: 11px; }
-  .statusbar .right { float: right; }
+  /* 图表工具栏 */
+  .chart-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    padding: 4px 0;
+    flex-wrap: wrap;
+  }
+  .chart-toolbar select, .chart-toolbar input {
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--slate-300);
+    border-radius: var(--radius-md);
+    background: #fff;
+    font-size: 12px;
+    color: var(--slate-700);
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  .chart-toolbar select:focus, .chart-toolbar input:focus {
+    border-color: var(--primary);
+  }
+  .chart-container {
+    background: #fff;
+    border: 1px solid var(--slate-200);
+    border-radius: var(--radius-lg);
+    padding: 12px;
+    box-shadow: var(--shadow-sm);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow-x: auto;
+  }
+  .chart-container img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: var(--radius-sm);
+  }
+  /* 内联 SVG 质控图（点击排查面板需要）沿用 img 的缩放行为：
+     容器不够宽时按比例缩小，避免 flex 居中把左侧溢出裁到负坐标导致点不可点 */
+  #chart-svg-box svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+  }
 
-  /* ===== 模态框 ===== */
-  .modal-backdrop { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-  .modal { background: white; border-radius: 4px; padding: 16px; min-width: 400px; max-width: 90vw; max-height: 90vh; overflow-y: auto; }
-  .modal h2 { margin: 0 0 10px; font-size: 14px; }
-  .modal .close { float: right; cursor: pointer; color: #888; font-size: 18px; }
+  /* 统计卡片区 */
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 10px;
+  }
+  .stat-card {
+    background: #fff;
+    border: 1px solid var(--slate-200);
+    border-radius: var(--radius-md);
+    padding: 8px 10px;
+    text-align: center;
+    box-shadow: var(--shadow-sm);
+  }
+  .stat-card .label {
+    font-size: 11px;
+    color: var(--slate-500);
+    margin-bottom: 2px;
+  }
+  .stat-card .value {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--slate-800);
+    font-variant-numeric: tabular-nums;
+  }
 
-  /* ===== 排查面板 ===== */
-  .checklist-group { border: 1px solid #ddd; border-radius: 3px; margin: 6px 0; padding: 6px 10px; }
-  .checklist-group h4 { margin: 0 0 4px; font-size: 12px; color: #2c3e50; }
-  .checklist-group label { display: block; padding: 2px 0; cursor: pointer; }
-  .f2-tips { background: #fff7e6; border: 1px solid #f0c674; padding: 6px 8px; color: #6b4f00; font-size: 11px; margin-bottom: 8px; }
+  /* 测量数据表 */
+  .table-card {
+    background: #fff;
+    border: 1px solid var(--slate-200);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .table-header-bar {
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--slate-200);
+    background: var(--slate-50);
+  }
+  .table-scroll {
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  th {
+    background: var(--slate-100);
+    color: var(--slate-700);
+    font-weight: 600;
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--slate-200);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  td {
+    padding: 7px 12px;
+    border-bottom: 1px solid var(--slate-100);
+    color: var(--slate-700);
+    font-variant-numeric: tabular-nums;
+  }
+  tr:hover td {
+    background-color: var(--slate-50);
+  }
+  tr.void {
+    color: var(--slate-400);
+    text-decoration: line-through;
+    background: #f8fafc;
+  }
+  tr.out_of_control td.value, tr.out_of_control td.status {
+    color: var(--danger);
+    font-weight: 600;
+  }
+  tr.warning td.value, tr.warning td.status {
+    color: var(--warning);
+    font-weight: 600;
+  }
+  tr.in_control td.value, tr.in_control td.status {
+    color: var(--success);
+  }
 
-  /* ===== 统计区 ===== */
-  .stats { display: flex; gap: 8px; margin: 8px 0; }
-  .stat-card { background: #ecf0f1; padding: 8px 12px; border-radius: 3px; flex: 1; text-align: center; }
-  .stat-card .label { font-size: 11px; color: #666; }
-  .stat-card .value { font-size: 16px; font-weight: bold; color: #2c3e50; }
+  /* 状态胶囊 */
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 8px;
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .status-pill.in { background: var(--success-bg); color: var(--success); border: 1px solid var(--success-border); }
+  .status-pill.warn { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border); }
+  .status-pill.ooc { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger-border); font-weight: 600; }
+  .status-pill.void { background: var(--slate-200); color: var(--slate-500); }
 
-  /* ===== 通知 ===== */
-  .toast { position: fixed; top: 20px; right: 20px; padding: 10px 16px; border-radius: 3px; color: white; z-index: 2000; box-shadow: 0 2px 6px rgba(0,0,0,0.2); }
-  .toast.success { background: #27ae60; }
-  .toast.error { background: #c0392b; }
-  .toast.info { background: #3498db; }
+  /* ===== 右侧：数据录入工作台 ===== */
+  .right-panel {
+    width: 360px;
+    background: #fff;
+    border-left: 1px solid var(--slate-200);
+    padding: 14px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .entry-tabs {
+    display: flex;
+    background: var(--slate-100);
+    padding: 3px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--slate-200);
+  }
+  .entry-tab-btn {
+    flex: 1;
+    border: none;
+    background: transparent;
+    padding: 6px 10px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--slate-600);
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    transition: all 0.15s ease;
+  }
+  .entry-tab-btn.active {
+    background: #fff;
+    color: var(--primary);
+    box-shadow: var(--shadow-sm);
+  }
 
-  .empty { color: #999; font-style: italic; padding: 10px; text-align: center; }
-  .status-pill { display: inline-block; padding: 1px 6px; border-radius: 8px; font-size: 10px; }
-  .status-pill.in { background: #d4efdf; color: #1e8449; }
-  .status-pill.warn { background: #fdebd0; color: #b9770e; }
-  .status-pill.ooc { background: #fadbd8; color: #922b21; }
-  .status-pill.void { background: #e0e0e0; color: #666; }
+  .form {
+    background: #fff;
+    border: 1px solid var(--slate-200);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .form-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .form-row label {
+    width: 76px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--slate-600);
+    flex-shrink: 0;
+  }
+  .form-row input, .form-row select {
+    flex: 1;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--slate-300);
+    border-radius: var(--radius-md);
+    font-size: 12px;
+    color: var(--slate-800);
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  .form-row input:focus, .form-row select:focus {
+    border-color: var(--primary);
+  }
+  .form-row input:disabled {
+    background: var(--slate-100);
+    color: var(--slate-500);
+  }
+  .form-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+  }
+
+  /* 批量上传区域 */
+  .batch-upload-box {
+    border: 2px dashed #93c5fd;
+    border-radius: var(--radius-lg);
+    padding: 28px 16px;
+    text-align: center;
+    background: #f8fafc;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .batch-upload-box:hover, .batch-upload-box.dragover {
+    background: #eff6ff;
+    border-color: var(--primary);
+  }
+  .batch-upload-box .upload-icon {
+    width: 36px;
+    height: 36px;
+    color: var(--primary);
+  }
+  .batch-upload-box .hint {
+    font-size: 11px;
+    color: var(--slate-500);
+  }
+
+  /* 按钮系统 */
+  button {
+    height: 30px;
+    padding: 0 12px;
+    background: var(--primary);
+    color: #fff;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    transition: all 0.15s ease;
+  }
+  button:hover { background: var(--primary-hover); }
+  button.secondary {
+    background: #fff;
+    color: var(--slate-700);
+    border-color: var(--slate-300);
+  }
+  button.secondary:hover {
+    background: var(--slate-50);
+    border-color: var(--slate-400);
+  }
+  button.danger {
+    background: var(--danger);
+  }
+  button.danger:hover {
+    background: var(--danger-hover);
+  }
+
+  /* ===== 提示框与通知 ===== */
+  .f2-tips {
+    background: var(--warning-bg);
+    border: 1px solid var(--warning-border);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    color: #92400e;
+    font-size: 11.5px;
+    line-height: 1.6;
+  }
+  .toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    padding: 10px 16px;
+    border-radius: var(--radius-md);
+    color: #fff;
+    font-size: 12.5px;
+    font-weight: 500;
+    z-index: 3000;
+    box-shadow: var(--shadow-lg);
+    animation: toastIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  @keyframes toastIn {
+    from { transform: translateY(-10px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  .toast.success { background: var(--success); }
+  .toast.error { background: var(--danger); }
+  .toast.info { background: var(--primary); }
+
+  /* ===== 模态弹窗系统 ===== */
+  .modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    animation: fadeIn 0.15s ease-out;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .modal {
+    background: #fff;
+    border-radius: var(--radius-lg);
+    padding: 18px 22px;
+    min-width: 440px;
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--slate-200);
+  }
+  .modal h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--slate-900);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .modal .close-btn {
+    cursor: pointer;
+    color: var(--slate-400);
+    font-size: 20px;
+    line-height: 1;
+    border: none;
+    background: transparent;
+    padding: 0 4px;
+  }
+  .modal .close-btn:hover { color: var(--slate-700); }
+
+  .checklist-group {
+    border: 1px solid var(--slate-200);
+    border-radius: var(--radius-md);
+    margin: 8px 0;
+    padding: 8px 12px;
+  }
+  .checklist-group h4 {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: var(--slate-700);
+  }
+  .checklist-group label {
+    display: block;
+    padding: 3px 0;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--slate-600);
+  }
+
+  /* 动态列表卡片与输入组 */
+  .lot-card {
+    background: #fff;
+    border: 1px solid var(--slate-200);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    margin-bottom: 10px;
+    position: relative;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+  }
+  .lot-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px dashed var(--slate-200);
+  }
+  .lot-card-title {
+    font-weight: 600;
+    color: var(--slate-800);
+    font-size: 12.5px;
+  }
+  .person-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .person-row input {
+    flex: 1;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--slate-300);
+    border-radius: var(--radius-md);
+    font-size: 12px;
+  }
+  .calc-tab-btn {
+    border: 1px solid var(--slate-300);
+    background: #fff;
+    padding: 3px 8px;
+    font-size: 11px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--slate-600);
+  }
+  .calc-tab-btn.active {
+    background: #eff6ff;
+    color: var(--primary);
+    border-color: #93c5fd;
+    font-weight: 600;
+  }
+
+  /* 状态栏 */
+  .statusbar {
+    height: 28px;
+    background: #fff;
+    border-top: 1px solid var(--slate-200);
+    padding: 0 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--slate-500);
+  }
+  .statusbar .status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .statusbar .status-dot-sm {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+  }
+  .empty {
+    color: var(--slate-400);
+    font-style: normal;
+    padding: 16px;
+    text-align: center;
+    font-size: 12px;
+  }
 </style>
 </head>
 <body>
 
+<!-- 顶栏 -->
 <div class="menubar">
-  <span class="title">🧪 质控工具 V1.3</span>
-  <span class="menu-item" onclick="openLabSettings()">系统设置</span>
-  <span class="menu-item" onclick="openChart()">质控图</span>
-  <span class="menu-item" onclick="openReports()">报表</span>
-  <span class="menu-item" onclick="openBackups()">从备份恢复…</span>
-  <span class="lab-name" id="lab-name">实验室：（未设置）</span>
+  <div class="brand">
+    <svg class="brand-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <path d="M10 2v7.31L4.31 15A3 3 0 0 0 6.42 20h11.16a3 3 0 0 0 2.11-5L14 9.31V2"/>
+      <path d="M8.5 2h7"/>
+      <path d="M7 16h10"/>
+    </svg>
+    <span>临床质控系统 V1.3</span>
+  </div>
+
+  <div class="nav-links">
+    <span class="menu-item" onclick="openLabSettings()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      系统设置
+    </span>
+    <span class="menu-item" onclick="openChart()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      质控图
+    </span>
+    <span class="menu-item" onclick="openReports()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      报表
+    </span>
+    <span class="menu-item" onclick="openBackups()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      从备份恢复…
+    </span>
+  </div>
+
+  <div class="lab-badge">
+    <span class="status-dot" id="lab-dot"></span>
+    <span class="lab-name" id="lab-name">实验室：（未设置）</span>
+  </div>
 </div>
 
+<!-- 主体三栏 -->
 <div class="main">
-  <!-- 左：项目 + 指标 -->
+  <!-- 左栏：项目与指标 -->
   <div class="left-panel">
-    <h3>检验项目</h3>
-    <ul class="list" id="project-list"></ul>
-    <div class="form-actions">
-      <button onclick="newProject()">+ 新建项目</button>
-      <button class="secondary" onclick="editProject()">编辑</button>
-      <button class="danger" onclick="deleteProject()">删除</button>
+    <div>
+      <div class="panel-header">
+        <span class="panel-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          检验项目
+        </span>
+      </div>
+      <ul class="list" id="project-list"></ul>
+      <div class="btn-group" style="margin-top: 8px;">
+        <button onclick="openIntegratedModal()" title="新建项目、指标（双水平）与质控品信息" style="background:#0284c7; width:100%; margin-bottom:4px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          + 新建项目向导 (一体化)
+        </button>
+        <button class="secondary" onclick="editProject()">编辑</button>
+        <button class="danger" onclick="deleteProject()">删除</button>
+      </div>
     </div>
-    <h3>检测指标（<span id="ti-count">0</span>）</h3>
-    <ul class="list" id="test-item-list"></ul>
-    <div class="form-actions">
-      <button onclick="newTestItem()">+ 新建指标</button>
-      <button class="secondary" onclick="editTestItem()">编辑</button>
-      <button class="danger" onclick="deleteTestItem()">删除</button>
-      <button class="secondary" onclick="addLot()">+ 新批号</button>
+
+    <div>
+      <div class="panel-header">
+        <span class="panel-title">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          检测指标
+        </span>
+        <span class="badge-count" id="ti-count">0</span>
+      </div>
+      <ul class="list" id="test-item-list"></ul>
+      <div class="btn-group" style="margin-top: 8px;">
+        <button onclick="newTestItem()">+ 新建指标</button>
+        <button class="secondary" onclick="editTestItem()">编辑</button>
+        <button class="danger" onclick="deleteTestItem()">删除</button>
+        <button class="secondary" onclick="addLot()">+ 新批号</button>
+      </div>
     </div>
   </div>
 
-  <!-- 中：统计 + LJ 图 + 测量表 -->
+  <!-- 中栏：质控图与数据分析 -->
   <div class="center-panel">
-    <div id="middle-empty" class="empty">请在左侧选项目 + 检测指标</div>
-    <div id="middle-content" style="display:none">
-      <h3>当前：<span id="current-label"></span></h3>
+    <div id="middle-empty" class="empty">请在左侧选择检验项目与检测指标查看质控状态</div>
 
+    <div id="middle-content" style="display:none; display:flex; flex-direction:column; gap:12px;">
+      <!-- 抬头信息卡片 -->
+      <div class="header-card">
+        <div class="header-title-box">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          <h3>当前指标：<span id="current-label" style="color:var(--primary);"></span></h3>
+        </div>
+        <div class="target-sd-pill">
+          靶值 <b id="info-target" style="color:var(--slate-800);">-</b> · SD <b id="info-sd" style="color:var(--slate-800);">-</b>
+        </div>
+      </div>
+
+      <!-- 工具栏 -->
       <div class="chart-toolbar">
-        <span>质控图：</span>
+        <span style="font-size:12px; font-weight:500; color:var(--slate-600);">质控图：</span>
         <select id="chart-year" onchange="refreshChart()"></select>
         <select id="chart-month" onchange="refreshChart()">
           <option value="1">1月</option><option value="2">2月</option><option value="3">3月</option>
@@ -140,67 +913,134 @@
           <option value="7">7月</option><option value="8">8月</option><option value="9">9月</option>
           <option value="10">10月</option><option value="11">11月</option><option value="12">12月</option>
         </select>
-        <span>状态过滤：</span>
+        <span style="font-size:12px; font-weight:500; color:var(--slate-600); margin-left:4px;">状态过滤：</span>
         <select id="chart-status" onchange="refreshChart()">
-          <option value="">全部</option>
+          <option value="">全部状态</option>
           <option value="in">在控</option>
           <option value="warning">警告</option>
           <option value="ooc">失控</option>
           <option value="void">作废</option>
         </select>
+        <button class="secondary" id="btn-chart-config" onclick="openChartConfig()">图表配置</button>
+        <button class="secondary" id="btn-export-png" onclick="exportChartPng()" title="导出当前质控图为 PNG 图片 (spec §G.3)">导出图片</button>
         <button class="secondary" onclick="refreshChart()">刷新</button>
-        <span style="margin-left:auto; color: #888; font-size: 11px;">靶值 <b id="info-target">-</b> · SD <b id="info-sd">-</b></span>
+        <button class="primary-btn" id="btn-open-single-entry" onclick="openSingleEntryModal()" style="background:var(--primary); color:#fff; font-weight:600;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          ＋ 单条录入
+        </button>
+        <button class="secondary" id="btn-open-batch-entry" onclick="openBatchImportModal()" style="font-weight:600; color:var(--primary); border-color:#93c5fd;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          ⇪ 批量导入 Excel
+        </button>
       </div>
 
-      <div class="chart-container">
-        <img id="chart-img" src="" alt="LJ Chart" style="min-height: 480px;"/>
+      <!-- 图表视窗 + 右侧排查面板（用户需求 2026-10-14：点击图上点 → 右侧展示排查信息）
+           窄窗口下面板自动换行到图下方，保证图不被压到无法点击 -->
+      <div style="display:flex; gap:12px; align-items:stretch; flex-wrap:wrap;">
+        <div class="chart-container" style="flex:1 1 420px; min-width:420px;">
+          <div id="chart-svg-box" style="min-height:480px;"></div>
+        </div>
+        <div id="point-panel" style="width:300px; flex:0 0 300px; border:1px solid var(--slate-200); border-radius:var(--radius-md); background:#fff; padding:12px; overflow-y:auto; max-height:640px;">
+          <div id="point-panel-body" style="color:var(--slate-400); font-size:12px; line-height:1.7;">点击图上数据点查看排查信息</div>
+        </div>
       </div>
 
+      <!-- 统计指标看板 -->
       <div class="stats" id="stats-area"></div>
 
-      <h3>测量列表 <button class="secondary" onclick="loadMeasurements()">刷新</button>
-        <button class="secondary" id="btn-template" onclick="downloadTemplate()" title="下载 Excel 批量导入模板（spec §B.3）">下载模板</button>
-        <button class="secondary" id="btn-import" onclick="document.getElementById('file-import').click()" title="选择 .xlsx 批量导入（spec §B.2）">导入 Excel</button>
-        <input type="file" id="file-import" accept=".xlsx" style="display:none">
-      </h3>
-      <div style="max-height: 300px; overflow-y: auto;">
-        <table id="measurements-table">
-          <thead>
-            <tr><th>id</th><th>日期</th><th>水平</th><th>批号</th><th>序号</th><th>测定值</th><th>状态</th><th>规则</th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+      <!-- 测量数据表卡片 -->
+      <div class="table-card">
+        <div class="table-header-bar">
+          <div style="font-weight:600; color:var(--slate-800); display:flex; align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            测量数据列表
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="secondary" onclick="loadMeasurements()">刷新</button>
+            <button class="secondary" id="btn-template" onclick="downloadTemplate()" title="下载 Excel 批量导入模板（spec §B.3）">下载模板</button>
+            <button class="secondary" id="btn-import" onclick="document.getElementById('file-import').click()" title="选择 .xlsx 批量导入（spec §B.2）">导入 Excel</button>
+            <input type="file" id="file-import" accept=".xlsx" style="display:none">
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table id="measurements-table">
+            <thead>
+              <tr><th>id</th><th>日期</th><th>水平</th><th>批号</th><th>序号</th><th>测定值</th><th>状态</th><th>规则</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- 右：录入表单 -->
-  <div class="right-panel">
-    <h3>录入</h3>
-    <div class="form" id="entry-form">
-      <div class="form-row"><label>项目</label><input id="ef-project" disabled></div>
-      <div class="form-row"><label>指标</label><input id="ef-ti" disabled></div>
-      <div class="form-row"><label>水平</label>
-        <select id="ef-level"><option>L</option><option>H</option></select>
+  <!-- 右栏：隐藏的录入底座容器（保留 ID 确保脚本和自动化测试无缝兼容） -->
+  <div style="display:none;" id="headless-entry-vault">
+    <div class="entry-tabs">
+      <button class="entry-tab-btn active" id="tab-entry-single" onclick="switchEntryMode('single')">单条手工录入</button>
+      <button class="entry-tab-btn" id="tab-entry-batch" onclick="switchEntryMode('batch')">批量录入 (Excel)</button>
+    </div>
+
+    <!-- 单条录入面板容器 -->
+    <div id="panel-entry-single">
+      <div class="form" id="entry-form">
+        <div class="form-row"><label>检验项目</label><input id="ef-project" disabled></div>
+        <div class="form-row"><label>检测指标</label><input id="ef-ti" disabled></div>
+        <div class="form-row"><label>水平</label>
+          <select id="ef-level"><option>L</option><option>H</option></select>
+        </div>
+        <div class="form-row"><label>批号</label><input id="ef-lot" value="LOT1"></div>
+        <div class="form-row"><label>测定日期</label><input type="date" id="ef-date"></div>
+        <div class="form-row"><label>序号</label><input type="number" id="ef-seq" value="0" min="0" max="999"></div>
+        <div class="form-row"><label>测定值</label><input type="number" id="ef-value" value="5.0" step="0.001"></div>
+        <div class="form-row"><label>操作人员</label><input id="ef-operator" placeholder="可选填"></div>
+        <div class="form-row"><label>前处理人员</label><input id="ef-pre-processor" placeholder="可选填"></div>
+        <div class="form-row"><label>备注说明</label><input id="ef-note" placeholder="可选填"></div>
+        <div class="form-actions">
+          <button style="flex:1;" onclick="submitEntry()">保存并判定</button>
+          <button class="secondary" onclick="resetEntry()">清空</button>
+        </div>
       </div>
-      <div class="form-row"><label>批号</label><input id="ef-lot" value="LOT1"></div>
-      <div class="form-row"><label>日期</label><input type="date" id="ef-date"></div>
-      <div class="form-row"><label>序号</label><input type="number" id="ef-seq" value="0" min="0" max="999"></div>
-      <div class="form-row"><label>测定值</label><input type="number" id="ef-value" value="5.0" step="0.001"></div>
-      <div class="form-row"><label>操作人员</label><input id="ef-operator" placeholder="可选"></div>
-      <div class="form-row"><label>前处理人员</label><input id="ef-pre-processor" placeholder="可选"></div>
-      <div class="form-row"><label>备注</label><input id="ef-note" placeholder="可选"></div>
-      <div class="form-actions">
-        <button onclick="submitEntry()">保存</button>
-        <button class="secondary" onclick="resetEntry()">清空</button>
+    </div>
+
+    <!-- 批量录入面板容器 -->
+    <div id="panel-entry-batch" style="display:none; display:flex; flex-direction:column; gap:10px;">
+      <div class="f2-tips">
+        <b>批量录入规范：</b><br>
+        1. 必须使用标准 6 列模板（项目名、检测指标、水平、批号、日期、测定值）<br>
+        2. 支持跨水平(L/H)及同批多指标数据一次性导入并即时触发 Westgard 规则判定<br>
+        3. 如格式错误将自动跳过并生成明细报告
       </div>
+
+      <button class="secondary" id="btn-batch-template" style="width:100%; height:34px;" onclick="downloadTemplate()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        下载 Excel 批量导入模板
+      </button>
+
+      <div class="batch-upload-box" id="batch-drop-zone" onclick="document.getElementById('file-batch-import').click()">
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="12" y1="18" x2="12" y2="12"/>
+          <polyline points="9 15 12 12 15 15"/>
+        </svg>
+        <div style="font-weight:600; color:var(--slate-800);">点击选择文件 或 将 .xlsx 拖拽至此处</div>
+        <div class="hint">严格支持 .xlsx 模板，导入后即时触发规则判定</div>
+        <input type="file" id="file-batch-import" accept=".xlsx" style="display:none" onchange="onBatchFileSelected(event)">
+      </div>
+
+      <div id="batch-file-info" style="font-size:11px; color:var(--slate-600); margin-top:4px; display:none;"></div>
     </div>
   </div>
 </div>
 
+<!-- 底栏状态栏 -->
 <div class="statusbar">
-  <span id="status-left">就绪</span>
-  <span class="right" id="status-right">QC Tool Web V1.3 · spec V1.3 · 业务模块 100% 复用</span>
+  <div class="status-indicator">
+    <span class="status-dot-sm"></span>
+    <span id="status-left">系统就绪</span>
+  </div>
+  <span class="right" id="status-right">QC Tool Web V1.3 · 严格遵循 Spec V1.3 · 业务引擎零改动</span>
 </div>
 
 <!-- Modal 容器 -->
@@ -208,7 +1048,7 @@
 
 <script>
 // ============================================================================
-// 全局状态
+// 全局状态管理
 // ============================================================================
 const state = {
   labName: null,
@@ -218,10 +1058,12 @@ const state = {
   currentProjectId: null,
   currentTestItemId: null,
   currentTestItem: null,
+  // 质控图范围：pair=点卡片空白处显示 L+H 双轴图；single=点 L/H 子行只显示该水平
+  chartScope: "pair",
   isLabPending: true,
-  // spec §B.2 全量预览（PR#1）：保存当前选中的 xlsx 文件 + 解析后的预览行
   importFile: null,
-  importPreviewRows: null,   // {ok: [...], skipped: [...], error_summary: str}
+  importPreviewRows: null,
+  nextSeq: 1,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -250,7 +1092,7 @@ function toast(kind, msg) {
   div.className = "toast " + kind;
   div.textContent = msg;
   document.body.appendChild(div);
-  setTimeout(() => div.remove(), 3000);
+  setTimeout(() => div.remove(), 3200);
 }
 
 function statusPill(s) {
@@ -271,11 +1113,10 @@ function rowClass(m) {
 }
 
 // ============================================================================
-// 初始化
+// 初始化逻辑
 // ============================================================================
 async function init() {
   $("ef-date").value = new Date().toISOString().slice(0, 10);
-  // 初始化月份
   const now = new Date();
   const ySel = $("chart-year");
   for (let y = now.getFullYear() - 2; y <= now.getFullYear() + 1; y++) {
@@ -289,17 +1130,24 @@ async function init() {
   await loadLab();
   await loadProjects();
 
-  // spec §B.2 批量导入：监听文件选择（spec V1.3 §B.2 全量预览 → 确认导入）
-  $("file-import").addEventListener("change", onImportFileSelected);
+  const fileInput = $("file-import");
+  if (fileInput) {
+    fileInput.addEventListener("change", onImportFileSelected);
+  }
+  bindChartClicks();
 }
 
 async function loadLab() {
   const d = await api("GET", "/api/lab");
   state.labName = d.lab_name;
   state.isLabPending = d.lab_name === null;
-  $("lab-name").textContent = "实验室：" + (d.lab_name || "（未设置，请点击系统设置）");
+  $("lab-name").textContent = d.lab_name || "（未设置，请点击系统设置）";
+  const dot = $("lab-dot");
+  if (dot) {
+    dot.className = "status-dot" + (state.isLabPending ? " pending" : "");
+  }
   if (state.isLabPending) {
-    setStatus("⚠ 首次启动：请点击右上「系统设置」填入实验室名称");
+    setStatus("请点击右上「系统设置」填入实验室名称");
   } else {
     setStatus("就绪 · 实验室=" + d.lab_name);
   }
@@ -311,14 +1159,15 @@ async function loadProjects() {
   const ul = $("project-list");
   ul.innerHTML = "";
   if (list.length === 0) {
-    ul.innerHTML = `<li class="empty">暂无项目，点击左下「+ 新建项目」</li>`;
+    ul.innerHTML = `<li class="empty">暂无项目，点击下方「+ 新建项目」</li>`;
     $("ti-count").textContent = "0";
-    $("test-item-list").innerHTML = `<li class="empty">（先建项目）</li>`;
+    $("test-item-list").innerHTML = `<li class="empty">（请先创建项目）</li>`;
     return;
   }
   for (const p of list) {
     const li = document.createElement("li");
-    li.textContent = p.name + (p.unit ? ` (${p.unit})` : "");
+    li.innerHTML = `<span class="title-text">${escapeHtml(p.name)}</span>` +
+                   (p.unit ? `<span class="meta">${escapeHtml(p.unit)}${p.manufacturer ? ' · ' + escapeHtml(p.manufacturer) : ''}</span>` : "");
     li.onclick = () => selectProject(p);
     li.dataset.id = p.id;
     if (state.currentProjectId === p.id) li.classList.add("active");
@@ -336,28 +1185,90 @@ async function selectProject(p) {
   });
   const items = await api("GET", `/api/projects/${p.id}/test_items`);
   state.testItems = items;
-  $("ti-count").textContent = items.length;
+
+  // 按检测指标名称进行聚合（同一指标名称下的 L 和 H 归并在同一张卡片内）
+  const groupsMap = new Map();
+  for (const it of items) {
+    if (!groupsMap.has(it.name)) {
+      groupsMap.set(it.name, []);
+    }
+    groupsMap.get(it.name).push(it);
+  }
+  const groups = Array.from(groupsMap.entries()).map(([name, list]) => ({
+    name,
+    items: list
+  }));
+
+  // 角标展示指标数及明细
+  $("ti-count").textContent = groups.length === items.length
+    ? `${items.length}`
+    : `${groups.length}项(${items.length}水平)`;
+
   const ul = $("test-item-list");
   ul.innerHTML = "";
   if (items.length === 0) {
     ul.innerHTML = `<li class="empty">暂无检测指标</li>`;
   }
-  for (const it of items) {
+
+  for (const g of groups) {
     const li = document.createElement("li");
-    li.innerHTML = `<b>${it.name}</b> <span class="meta">${it.lot} · ${it.level} · 靶=${it.target} SD=${it.sd}</span>`;
-    li.onclick = () => selectTestItem(it);
-    li.dataset.id = it.id;
-    if (state.currentTestItemId === it.id) li.classList.add("active");
+    li.className = "test-item-card";
+    li.dataset.itemName = g.name;
+
+    // 对水平排序：通常高水平 H 在前，低水平 L 在后（也可按名称/level展示）
+    const sortedLevels = [...g.items].sort((a, b) => {
+      if (a.level === b.level) return 0;
+      return a.level === "H" ? -1 : 1;
+    });
+
+    const isGroupActive = g.items.some(x => x.id === state.currentTestItemId);
+    if (isGroupActive) li.classList.add("active");
+
+    let subRowsHtml = `<div class="level-sub-group">`;
+    for (const it of sortedLevels) {
+      const isSubActive = state.currentTestItemId === it.id;
+      subRowsHtml += `
+        <div class="level-sub-row ${isSubActive ? 'active' : ''}" data-id="${it.id}" onclick="selectTestItemById(${it.id}, event)">
+          <span class="tag-level ${it.level}">${it.level}</span>
+          <span class="meta">${escapeHtml(it.lot)} · 靶=${it.target} · SD=${it.sd}</span>
+        </div>
+      `;
+    }
+    subRowsHtml += `</div>`;
+
+    // 是否同时具备 L 和 H（同名即可配对，与后端 _render_chart_svg 配对逻辑一致）
+    const hasPair = sortedLevels.some(x => x.level === "L") && sortedLevels.some(x => x.level === "H");
+
+    li.innerHTML = `
+      <div class="ti-title-row" title="点击查看 ${escapeHtml(g.name)} 质控图${hasPair ? "（L+H 双轴图）" : ""}">
+        <span class="title-text" style="font-weight:600;">${escapeHtml(g.name)}</span>
+        ${hasPair
+          ? `<span class="ti-pair-badge">L+H 双轴图</span>`
+          : `<span style="font-size:10px; color:var(--slate-400);">${g.items.length}个水平</span>`}
+      </div>
+      ${subRowsHtml}
+    `;
+
+    // 点击卡片（标题或空白处）即选中该指标 → 质控图自动展示 L+H 双轴图，
+    // 无需先点击具体的水平子行；子行点击则切换为只显示该水平的单曲线图。
+    li.onclick = (e) => {
+      if (e.target.closest(".level-sub-row")) return;
+      state.chartScope = "pair";
+      const targetItem = g.items.find(x => x.id === state.currentTestItemId) || sortedLevels[0];
+      if (targetItem) selectTestItem(targetItem);
+    };
+
     ul.appendChild(li);
   }
+
   if (!state.currentTestItemId && items.length > 0) {
     selectTestItem(items[0]);
   } else if (state.currentTestItemId) {
-    // 刷新当前
     const cur = items.find(x => x.id === state.currentTestItemId);
     if (cur) {
       state.currentTestItem = cur;
       refreshMiddle();
+      syncTestItemHighlight();
     }
   }
   $("ef-project").value = p.name;
@@ -366,12 +1277,35 @@ async function selectProject(p) {
   }
 }
 
+function selectTestItemById(tid, event) {
+  if (event) event.stopPropagation();
+  // 点具体 L/H 子行：质控图只显示该水平一条曲线
+  state.chartScope = "single";
+  const it = state.testItems.find(x => x.id === tid);
+  if (it) selectTestItem(it);
+}
+
+function syncTestItemHighlight() {
+  const currentId = state.currentTestItemId;
+  const pairMode = state.chartScope === "pair";
+  document.querySelectorAll("#test-item-list li").forEach(li => {
+    const subRows = li.querySelectorAll(".level-sub-row");
+    let hasActive = false;
+    subRows.forEach(row => {
+      const isRowActive = !pairMode && parseInt(row.dataset.id) === currentId;
+      row.classList.toggle("active", isRowActive);
+      if (isRowActive) hasActive = true;
+    });
+    // pair 模式：不亮具体子行，整卡片高亮；single 模式：只亮对应子行所在卡片
+    const inGroup = Array.from(subRows).some(row => parseInt(row.dataset.id) === currentId);
+    li.classList.toggle("active", pairMode ? inGroup : hasActive);
+  });
+}
+
 function selectTestItem(it) {
   state.currentTestItemId = it.id;
   state.currentTestItem = it;
-  document.querySelectorAll("#test-item-list li").forEach(li => {
-    li.classList.toggle("active", parseInt(li.dataset.id) === it.id);
-  });
+  syncTestItemHighlight();
   $("ef-ti").value = it.name;
   $("ef-level").value = it.level;
   $("ef-lot").value = it.lot;
@@ -387,13 +1321,37 @@ function refreshMiddle() {
     return;
   }
   $("middle-empty").style.display = "none";
-  $("middle-content").style.display = "block";
-  $("current-label").textContent = `${it.name} · ${it.lot} · ${it.level}`;
-  $("info-target").textContent = it.target;
-  $("info-sd").textContent = it.sd;
+  $("middle-content").style.display = "flex";
+
+  // 查看是否有同批同名配对水平
+  const siblings = state.testItems ? state.testItems.filter(x => x.name === it.name && x.lot === it.lot) : [];
+  const itemL = siblings.find(x => x.level === "L");
+  const itemH = siblings.find(x => x.level === "H");
+
+  if (itemL && itemH && state.chartScope !== "single") {
+    $("current-label").textContent = `${it.name} · ${it.lot} (双水平 L/H)`;
+    $("info-target").innerHTML = `<span style="color:#0284c7;">L=${itemL.target}</span> / <span style="color:#db2777;">H=${itemH.target}</span>`;
+    $("info-sd").innerHTML = `<span style="color:#0284c7;">L=${itemL.sd}</span> / <span style="color:#db2777;">H=${itemH.sd}</span>`;
+  } else {
+    $("current-label").textContent = `${it.name} · ${it.lot} · ${it.level}`;
+    $("info-target").textContent = it.target;
+    $("info-sd").textContent = it.sd;
+  }
+
   refreshChart();
   loadStats();
   loadMeasurements();
+}
+
+function getChartConfig() {
+  const saved = localStorage.getItem("qc_chart_config");
+  if (!saved) {
+    return [
+      "project_name", "lot", "target", "sd",
+      "operator", "pre_processor"
+    ];
+  }
+  try { return JSON.parse(saved); } catch { return []; }
 }
 
 function refreshChart() {
@@ -402,9 +1360,313 @@ function refreshChart() {
   const y = $("chart-year").value;
   const m = $("chart-month").value;
   const s = $("chart-status").value;
-  const url = `/api/chart/${it.id}.svg?year=${y}&month=${m}` + (s ? `&status=${s}` : "");
-  // 加时间戳防缓存
-  $("chart-img").src = url + "&t=" + Date.now();
+  const cfg = getChartConfig();
+  const infoParam = cfg.length > 0 ? `&info=${encodeURIComponent(cfg.join(","))}` : "";
+  const url = `/api/chart/${it.id}.svg?year=${y}&month=${m}` + (s ? `&status=${s}` : "") + infoParam
+    + `&scope=${state.chartScope}`;
+  state.chartSvgUrl = url;
+  // 内联注入 SVG（<img> 无法捕获点上点击），事件委托绑定 data-mid 点击
+  fetch(url + "&t=" + Date.now())
+    .then((r) => r.text())
+    .then((svgText) => { $("chart-svg-box").innerHTML = svgText; })
+    .catch((e) => {
+      $("chart-svg-box").innerHTML =
+        `<div style="padding:24px; color:var(--danger);">图表加载失败：${escapeHtml(e?.message || e)}</div>`;
+    });
+}
+
+// ============================================================================
+// 图上点点击 → 右侧排查面板（用户需求 2026-10-14；spec §E.1 c / §F.1）
+// ============================================================================
+const POINT_STATUS_LABEL = { "in_control": "在控", "warning": "警告", "out_of_control": "失控" };
+const POINT_STATUS_COLOR = { "in_control": "#334155", "warning": "#d9a400", "out_of_control": "#c0392b" };
+const PLAN_CACHE = {};
+
+function bindChartClicks() {
+  const box = $("chart-svg-box");
+  if (!box || box._ptClickBound) return;
+  box._ptClickBound = true;
+  box.addEventListener("click", (e) => {
+    const el = e.target && e.target.closest ? e.target.closest("[data-mid]") : null;
+    if (el) showPointPanel(el);
+  });
+}
+
+async function showPointPanel(el) {
+  const d = el.dataset;
+  const label = POINT_STATUS_LABEL[d.status] || d.status;
+  const color = POINT_STATUS_COLOR[d.status] || "#334155";
+  let html = `
+    <div style="font-weight:600; font-size:13px; color:var(--slate-800); border-bottom:1px solid var(--slate-200); padding-bottom:6px; margin-bottom:4px;">数据点排查信息</div>
+    <table style="font-size:12px; border-collapse:collapse;">
+      <tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">检测日期</td><td>${escapeHtml(d.date)}</td></tr>
+      <tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">序号</td><td>${escapeHtml(d.seq)}</td></tr>
+      <tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">检测值</td><td>${escapeHtml(d.value)}</td></tr>
+      <tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">水平</td><td>${escapeHtml(d.level)}</td></tr>
+      <tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">状态</td><td style="color:${color}; font-weight:600;">${label}</td></tr>`;
+  if (d.rules) {
+    html += `<tr><td style="color:var(--slate-500); padding:3px 10px 3px 0;">触发规则</td>
+      <td style="color:var(--danger); font-weight:600;">${escapeHtml(d.rules)}</td></tr>`;
+  }
+  html += `</table>`;
+  if (d.status === "out_of_control") {
+    html += `<div id="point-panel-release-box" style="margin-top:10px; border:1px solid #fecaca; background:#fef2f2; border-radius:6px; padding:8px 10px;">
+      <div style="font-weight:600; font-size:12px; color:var(--danger);">结果发放建议</div>
+      <div id="point-panel-release" style="font-size:12px; color:var(--danger); font-weight:600; margin-top:2px;">加载中…</div>
+    </div>`;
+    html += `<div style="margin-top:10px; font-weight:600; font-size:12px; color:var(--danger);">排查清单（spec §F.1）</div>
+      <div id="point-panel-checklist" style="font-size:12px; color:var(--slate-500);">加载中…</div>`;
+  }
+  $("point-panel-body").innerHTML = html;
+  if (d.status === "out_of_control") {
+    await loadOocPanel(d.mid, d.rules);
+    await loadReleaseAdvice(d.mid);
+  }
+}
+
+// ---- 结果发放建议（用户需求 2026-10-14）：失控点 → 序号区间内样本不允许发放 ----
+// 区间只在同日闭合：中间点=前后序号区间；当日最后点=前点至该点；
+// 首点/仅一点=当日开始至该点。非失控/作废 → 后端返回 null，隐藏区块。
+async function loadReleaseAdvice(mid) {
+  const box = $("point-panel-release-box");
+  const el = $("point-panel-release");
+  if (!box || !el) return;
+  try {
+    const res = await fetch(`/api/ooc/${mid}/release-advice`);
+    if (!res.ok) throw new Error(String(res.status));
+    const data = await res.json();
+    if (data && data.advice && data.advice.text) {
+      el.textContent = data.advice.text;
+    } else {
+      box.style.display = "none";
+    }
+  } catch {
+    box.style.display = "none";
+  }
+}
+
+// ---- 失控点排查清单：查看/编辑两模式，联动 F.1（2026-10-14 用户补充裁定）----
+// 查看模式：只展示用户已勾选保存的排查项（未保存过 → 提示）；「编辑」进入
+// 编辑模式：全量 spec §F.1 清单可勾选（预选已保存项）+ 结论 + 保存 → 回查看模式。
+let panelOocCtx = null; // { mid, rules }
+
+function normalizeChecklist(raw) {
+  // 落库两种格式 → {分类: [条目]}（只留勾选为真的）
+  //   web 面板格式 {cat: [item,...]}；桌面旧弹窗格式 {"分类_条目": bool}
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [k, v] of Object.entries(raw)) {
+    if (Array.isArray(v)) {
+      if (v.length) out[k] = v.map(String);
+    } else if (v) {
+      const i = k.indexOf("_");
+      if (i > 0) {
+        const cat = k.slice(0, i), item = k.slice(i + 1);
+        (out[cat] = out[cat] || []).push(item);
+      } else {
+        (out["其他"] = out["其他"] || []).push(k);
+      }
+    }
+  }
+  return out;
+}
+
+async function planCategories(rules) {
+  const key = rules || "";
+  if (!(key in PLAN_CACHE)) {
+    try {
+      const plan = await api("GET", `/api/investigation/plan?rules=${encodeURIComponent(key)}`);
+      PLAN_CACHE[key] = plan.categories || [];
+    } catch (e) {
+      PLAN_CACHE[key] = [];
+    }
+  }
+  return PLAN_CACHE[key] || [];
+}
+
+async function loadOocPanel(mid, rules) {
+  panelOocCtx = { mid, rules };
+  let rec = null, cats = [];
+  try {
+    [rec, cats] = await Promise.all([
+      api("GET", `/api/ooc/${mid}/investigation`),
+      planCategories(rules),
+    ]);
+  } catch (e) { /* api() 已 toast */ }
+  renderOocView(mid, rules, rec, cats);
+}
+
+function renderOocView(mid, rules, rec, cats) {
+  const box = $("point-panel-checklist");
+  if (!box) return;
+  const saved = normalizeChecklist(rec && rec.checklist);
+  const savedCats = Object.keys(saved).filter(c => (saved[c] || []).length > 0);
+  let html = "";
+  if (savedCats.length > 0) {
+    // 只展示用户勾选的结果，不展示全量清单
+    const order = cats.map(c => c.category).concat(savedCats.filter(c => !cats.some(x => x.category === c)));
+    for (const cat of order) {
+      const items = saved[cat];
+      if (!items || !items.length) continue;
+      html += `<div style="margin-top:6px; font-weight:600; color:var(--slate-700);">${escapeHtml(cat)}</div>`;
+      html += `<ul style="margin:4px 0 0 18px; padding:0;">`;
+      for (const it of items) html += `<li style="margin:2px 0;">${escapeHtml(it)}</li>`;
+      html += `</ul>`;
+    }
+    if (rec && rec.conclusion) {
+      html += `<div style="margin-top:8px; color:var(--slate-600);"><b>处理结论：</b>${escapeHtml(rec.conclusion)}</div>`;
+    }
+  } else {
+    html += `<div style="margin-top:4px; color:var(--slate-400);">尚未记录排查项</div>`;
+  }
+  html += `<div style="margin-top:8px;"><button class="secondary" style="width:100%;" onclick="enterOocEdit()">编辑排查清单</button></div>`;
+  box.innerHTML = html;
+}
+
+async function enterOocEdit() {
+  const ctx = panelOocCtx;
+  if (!ctx) return;
+  const box = $("point-panel-checklist");
+  if (!box) return;
+  const cats = await planCategories(ctx.rules);
+  let rec = null;
+  try { rec = await api("GET", `/api/ooc/${ctx.mid}/investigation`); } catch (e) { /* 已 toast */ }
+  const saved = normalizeChecklist(rec && rec.checklist);
+  const savedSet = new Set();
+  for (const [cat, items] of Object.entries(saved)) {
+    for (const it of items) savedSet.add(cat + "\u0000" + it);
+  }
+  let html = "";
+  for (const cat of cats) {
+    html += `<div class="checklist-group"><h4>${escapeHtml(cat.category)}</h4>`;
+    for (const it of cat.items) {
+      const key = cat.category + "\u0000" + it;
+      html += `<label><input type="checkbox" class="pt-inv-cb" data-cat="${escapeHtml(cat.category)}" data-item="${escapeHtml(it)}" ${savedSet.has(key) ? "checked" : ""}> ${escapeHtml(it)}</label>`;
+    }
+    html += `</div>`;
+  }
+  html += `<div class="form-row" style="margin-top:8px;"><label>排查结论</label><input id="pt-inv-conclusion" value="${escapeHtml((rec && rec.conclusion) || "")}" placeholder="处理结论记录（可选）"></div>`;
+  html += `<div class="form-actions"><button onclick="saveOocPanel(${ctx.mid})">保存排查记录</button><button class="secondary" onclick="cancelOocEdit()">取消</button></div>`;
+  box.innerHTML = html;
+}
+
+async function saveOocPanel(mid) {
+  const cbs = document.querySelectorAll(".pt-inv-cb:checked");
+  if (cbs.length === 0) {
+    toast("error", "请至少勾选一项检查项再保存（spec §F.1 d）");
+    return;
+  }
+  const items = Array.from(cbs).map(cb => ({ category: cb.dataset.cat, item: cb.dataset.item }));
+  const conclEl = $("pt-inv-conclusion");
+  const conclusion = conclEl && conclEl.value.trim() ? conclEl.value.trim() : null;
+  try {
+    await api("POST", `/api/ooc/${mid}/investigate`, { items, conclusion: conclusion || null });
+    toast("success", "排查记录已保存");
+    await refreshOocView(mid);
+  } catch (e) { /* api() 已 toast */ }
+}
+
+async function cancelOocEdit() {
+  const ctx = panelOocCtx;
+  if (!ctx) return;
+  await refreshOocView(ctx.mid);
+}
+
+async function refreshOocView(mid) {
+  const ctx = panelOocCtx;
+  const rules = (ctx && ctx.mid === mid) ? ctx.rules : "";
+  try {
+    const [rec, cats] = await Promise.all([
+      api("GET", `/api/ooc/${mid}/investigation`),
+      planCategories(rules),
+    ]);
+    renderOocView(mid, rules, rec, cats);
+  } catch (e) { /* api() 已 toast */ }
+}
+
+const ALL_CHART_FIELDS = [
+  { key: "project_name", label: "项目名称" },
+  { key: "lot", label: "质控品批号" },
+  { key: "target", label: "靶值" },
+  { key: "sd", label: "SD" },
+  { key: "operator", label: "仪器操作" },
+  { key: "pre_processor", label: "前处理" },
+];
+
+function openChartConfig() {
+  const current = new Set(getChartConfig());
+  const rows = ALL_CHART_FIELDS.map(f => `
+    <label style="display:inline-flex; align-items:center; gap:6px; width:48%; margin: 6px 0; cursor:pointer;">
+      <input type="checkbox" class="cfg-cb" value="${f.key}" ${current.has(f.key) ? "checked" : ""}> ${f.label}
+    </label>
+  `).join("");
+
+  showModal("图表配置 —— 质控图元信息", `
+    <div>
+      <p style="color:var(--slate-500); font-size:12px; margin-bottom:12px;">勾选要在质控图顶部显示的元信息项（时间范围始终显示）：</p>
+      <div style="display:flex; flex-wrap:wrap; margin-bottom:16px;">
+        ${rows}
+      </div>
+      <div class="form-actions" style="border-top:1px solid var(--slate-200); padding-top:12px;">
+        <button onclick="saveChartConfig()">确定保存</button>
+        <button class="secondary" onclick="toggleAllChartConfig(true)">全选</button>
+        <button class="secondary" onclick="toggleAllChartConfig(false)">全不选</button>
+        <button class="secondary" onclick="closeModal()">取消</button>
+      </div>
+    </div>
+  `);
+}
+
+function toggleAllChartConfig(checked) {
+  document.querySelectorAll(".cfg-cb").forEach(cb => { cb.checked = checked; });
+}
+
+function saveChartConfig() {
+  const chosen = Array.from(document.querySelectorAll(".cfg-cb:checked")).map(cb => cb.value);
+  localStorage.setItem("qc_chart_config", JSON.stringify(chosen));
+  closeModal();
+  toast("success", "已保存图表配置");
+  refreshChart();
+}
+
+async function exportChartPng() {
+  const svgEl = document.querySelector("#chart-svg-box svg");
+  if (!svgEl) {
+    toast("error", "暂无质控图可导出");
+    return;
+  }
+  try {
+    // 图表已内联渲染（点击排查面板需要），导出时序列化当前 DOM 中的 SVG
+    const svgText = new XMLSerializer().serializeToString(svgEl);
+    const blob = new Blob([svgText], { type: "image/svg+xml;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1800;
+      canvas.height = 960;
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      const a = document.createElement("a");
+      const it = state.currentTestItem;
+      const y = $("chart-year").value;
+      const m = $("chart-month").value;
+      a.download = `qc_chart_${it ? it.name : "export"}_${y}_${m}.png`;
+      a.href = canvas.toDataURL("image/png");
+      a.click();
+      toast("success", "质控图 PNG 已导出");
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      toast("error", "图片渲染失败");
+    };
+    image.src = url;
+  } catch (e) {
+    toast("error", "导出 PNG 失败: " + (e?.message || e));
+  }
 }
 
 async function loadStats() {
@@ -412,8 +1674,24 @@ async function loadStats() {
   if (!it) return;
   const y = $("chart-year").value;
   const m = $("chart-month").value;
+  // 同名同批号存在配对水平时，统计卡片同时展示 L/H 两个水平
+  const siblings = state.testItems ? state.testItems.filter(x => x.name === it.name && x.lot === it.lot) : [];
+  const itemL = siblings.find(x => x.level === "L");
+  const itemH = siblings.find(x => x.level === "H");
+  const isPair = !!(itemL && itemH);
   try {
     const d = await api("GET", `/api/stats/${it.id}?year=${y}&month=${m}`);
+    let dL = null, dH = null;
+    if (isPair) {
+      // 当前选中的可能是 L 也可能是 H，把两份统计按 L/H 归位
+      const otherId = (it.id === itemL.id) ? itemH.id : itemL.id;
+      try {
+        const d2 = await api("GET", `/api/stats/${otherId}?year=${y}&month=${m}`);
+        if (it.id === itemL.id) { dL = d; dH = d2; } else { dL = d2; dH = d; }
+      } catch (e2) {
+        if (it.id === itemL.id) { dL = d; } else { dH = d; }
+      }
+    }
     const area = $("stats-area");
     area.innerHTML = "";
     const mk = (label, val) => {
@@ -422,14 +1700,31 @@ async function loadStats() {
       div.innerHTML = `<div class="label">${label}</div><div class="value">${val ?? "—"}</div>`;
       area.appendChild(div);
     };
-    mk("本月 N", d.month?.n ?? "—");
-    mk("本月 均值", d.month?.mean != null ? d.month.mean.toFixed(3) : "—");
-    mk("本月 SD", d.month?.sd != null ? d.month.sd.toFixed(3) : "—");
-    mk("本月 CV%", d.month?.cv_pct != null ? d.month.cv_pct.toFixed(2) + "%" : "—");
-    mk("累计 N", d.cumulative?.n ?? "—");
-    mk("累计 均值", d.cumulative?.mean != null ? d.cumulative.mean.toFixed(3) : "—");
-    mk("累计 SD", d.cumulative?.sd != null ? d.cumulative.sd.toFixed(3) : "—");
-    mk("累计 CV%", d.cumulative?.cv_pct != null ? d.cumulative.cv_pct.toFixed(2) + "%" : "—");
+    if (isPair) {
+      // 双水平：左 L（蓝）/ 右 H（品红）
+      const sh = v => (v == null ? "—" : v);
+      const f3 = v => (v == null ? "—" : v.toFixed(3));
+      const f2 = v => (v == null ? "—" : v.toFixed(2) + "%");
+      const dual = (a, b) =>
+        `<span style="color:#0284c7;">L=${a}</span> / <span style="color:#db2777;">H=${b}</span>`;
+      mk("本月 N",     dual(sh(dL?.month?.n), sh(dH?.month?.n)));
+      mk("本月 均值",  dual(f3(dL?.month?.mean), f3(dH?.month?.mean)));
+      mk("本月 SD",    dual(f3(dL?.month?.sd), f3(dH?.month?.sd)));
+      mk("本月 CV%",   dual(f2(dL?.month?.cv_pct), f2(dH?.month?.cv_pct)));
+      mk("累计 N",     dual(sh(dL?.cumulative?.n), sh(dH?.cumulative?.n)));
+      mk("累计 均值",  dual(f3(dL?.cumulative?.mean), f3(dH?.cumulative?.mean)));
+      mk("累计 SD",    dual(f3(dL?.cumulative?.sd), f3(dH?.cumulative?.sd)));
+      mk("累计 CV%",   dual(f2(dL?.cumulative?.cv_pct), f2(dH?.cumulative?.cv_pct)));
+    } else {
+      mk("本月 N", d.month?.n ?? "—");
+      mk("本月 均值", d.month?.mean != null ? d.month.mean.toFixed(3) : "—");
+      mk("本月 SD", d.month?.sd != null ? d.month.sd.toFixed(3) : "—");
+      mk("本月 CV%", d.month?.cv_pct != null ? d.month.cv_pct.toFixed(2) + "%" : "—");
+      mk("累计 N", d.cumulative?.n ?? "—");
+      mk("累计 均值", d.cumulative?.mean != null ? d.cumulative.mean.toFixed(3) : "—");
+      mk("累计 SD", d.cumulative?.sd != null ? d.cumulative.sd.toFixed(3) : "—");
+      mk("累计 CV%", d.cumulative?.cv_pct != null ? d.cumulative.cv_pct.toFixed(2) + "%" : "—");
+    }
   } catch (e) { /* ignore */ }
 }
 
@@ -450,27 +1745,58 @@ async function loadMeasurements() {
       <td class="status">${statusPill(m.status)}</td><td>${m.rules || "—"}</td>`;
     tbody.appendChild(tr);
   }
+
+  // 智能月份对齐：检查当前选择的年月是否包含测量数据；若无且列表中有数据，自动跳转至最新测定数据的年月
+  if (list && list.length > 0) {
+    const curY = parseInt($("chart-year").value);
+    const curM = parseInt($("chart-month").value);
+    const curPrefix = `${curY}-${String(curM).padStart(2, '0')}`;
+    const hasDataInCurMonth = list.some(m => m.date && m.date.startsWith(curPrefix));
+    if (!hasDataInCurMonth) {
+      const dates = list.map(m => m.date).filter(Boolean).sort();
+      const latestDate = dates[dates.length - 1];
+      if (latestDate) {
+        const parts = latestDate.split("-");
+        const targetY = parseInt(parts[0]);
+        const targetM = parseInt(parts[1]);
+
+        let yOpt = Array.from($("chart-year").options).find(o => parseInt(o.value) === targetY);
+        if (!yOpt) {
+          const o = document.createElement("option");
+          o.value = targetY; o.textContent = targetY + "年";
+          $("chart-year").appendChild(o);
+        }
+        $("chart-year").value = targetY;
+        $("chart-month").value = targetM;
+
+        refreshChart();
+        loadStats();
+      }
+    }
+  }
 }
 
 // ============================================================================
-// spec §B.4 编辑 + 标记作废（右键菜单）
+// spec §B.4 编辑 + 标记作废（右键快捷菜单）
 // ============================================================================
 function showRowMenu(event, mid) {
-  // 关掉上次的菜单
   document.querySelectorAll(".row-menu").forEach(el => el.remove());
   const menu = document.createElement("div");
   menu.className = "row-menu";
   menu.style.cssText = `position:fixed;left:${event.clientX}px;top:${event.clientY}px;
-    background:white;border:1px solid #ccc;border-radius:4px;box-shadow:0 2px 6px rgba(0,0,0,0.2);
-    z-index:1000;padding:2px 0;font-size:13px;min-width:120px;`;
+    background:#fff;border:1px solid var(--slate-200);border-radius:var(--radius-md);box-shadow:var(--shadow-md);
+    z-index:1000;padding:4px 0;font-size:12px;min-width:130px;`;
   menu.innerHTML = `
     <div class="row-menu-item" onclick="showEditMeasurementModal(${mid})"
-         style="padding:6px 14px;cursor:pointer;">编辑</div>
+         style="padding:6px 14px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+      ✏️ 编辑测定值
+    </div>
     <div class="row-menu-item" onclick="voidMeasurement(${mid})"
-         style="padding:6px 14px;cursor:pointer;color:#c0392b;">标记作废</div>
+         style="padding:6px 14px;cursor:pointer;color:var(--danger);display:flex;align-items:center;gap:6px;">
+      🚫 标记作废
+    </div>
   `;
   document.body.appendChild(menu);
-  // 点其他地方关菜单
   setTimeout(() => {
     document.addEventListener("click", function closeMenu() {
       menu.remove();
@@ -486,21 +1812,24 @@ function showEditMeasurementModal(mid) {
     toast("error", "已作废的记录不可编辑"); return;
   }
   const html = `
-    <h3 style="margin:0 0 8px">编辑测量 #${mid}</h3>
-    <div style="display:grid;grid-template-columns:80px 1fr;gap:6px;align-items:center;font-size:13px">
-      <label>日期</label><input id="em-date" type="date" value="${m.date}">
-      <label>水平</label><select id="em-level"><option value="L" ${m.level==="L"?"selected":""}>L</option>
-        <option value="H" ${m.level==="H"?"selected":""}>H</option></select>
-      <label>批号</label><input id="em-lot" type="text" value="${escapeHtml(m.lot)}">
-      <label>序号</label><input id="em-seq" type="number" min="0" value="${m.seq}">
-      <label>测定值</label><input id="em-value" type="number" step="0.001" value="${m.value}">
-    </div>
-    <div class="form-actions" style="margin-top:12px">
-      <button onclick="saveEditMeasurement(${mid})">保存</button>
-      <button onclick="closeModal()">取消</button>
+    <div class="form">
+      <div class="form-row"><label>测定日期</label><input id="em-date" type="date" value="${m.date}"></div>
+      <div class="form-row"><label>水平</label>
+        <select id="em-level">
+          <option value="L" ${m.level==="L"?"selected":""}>L</option>
+          <option value="H" ${m.level==="H"?"selected":""}>H</option>
+        </select>
+      </div>
+      <div class="form-row"><label>批号</label><input id="em-lot" type="text" value="${escapeHtml(m.lot)}"></div>
+      <div class="form-row"><label>序号</label><input id="em-seq" type="number" min="0" value="${m.seq}"></div>
+      <div class="form-row"><label>测定值</label><input id="em-value" type="number" step="0.001" value="${m.value}"></div>
+      <div class="form-actions" style="margin-top:12px">
+        <button onclick="saveEditMeasurement(${mid})">保存并重新判定</button>
+        <button class="secondary" onclick="closeModal()">取消</button>
+      </div>
     </div>
   `;
-  showModal("编辑测量", html);
+  showModal(`编辑测量记录 #${mid}`, html);
 }
 
 async function saveEditMeasurement(mid) {
@@ -525,10 +1854,10 @@ async function saveEditMeasurement(mid) {
 }
 
 async function voidMeasurement(mid) {
-  if (!confirm(`确认标记作废测量 #${mid}？\n此操作不可撤销，记录将不再参与判定。`)) return;
+  if (!confirm(`确认标记作废测量 #${mid}？\n\n此操作不可撤销，该点记录将不再参与 Westgard 判定与图表统计。`)) return;
   try {
     await api("DELETE", `/api/measurements/${mid}`);
-    toast("success", "已标记作废");
+    toast("success", "已成功标记作废");
     await loadMeasurements();
   } catch (e) {
     toast("error", "作废失败: " + (e?.message || e));
@@ -536,54 +1865,130 @@ async function voidMeasurement(mid) {
 }
 
 // ============================================================================
-// 录入
+// 单条数据录入
 // ============================================================================
+// 弹窗打开时，日期/批号等字段与隐藏"录入底座容器"（#headless-entry-vault）存在
+// 同名 id；getElementById 会取到文档中靠前的隐藏元素，导致用户在弹窗里的输入
+// 被忽略（如：选了 4 月，实际按隐藏框里的"今天"存库）。弹窗打开时一律从弹窗内
+// 读取；弹窗未打开（自动化脚本直接驱动隐藏底座）则回退原行为。
+function entryField(id) {
+  const modalBody = $("modal-body");
+  if (modalBody && modalBody.querySelector("#ef-date")) {
+    return modalBody.querySelector("#" + id);
+  }
+  return $(id);
+}
+
 async function submitEntry() {
   const it = state.currentTestItem;
   if (!it) { toast("error", "请先选检测指标"); return; }
   if (state.isLabPending) { toast("error", "请先在系统设置中填入实验室名称"); return; }
+
+  // 检查是否为双水平弹窗
+  const valLInput = entryField("ef-value-l");
+  const valHInput = entryField("ef-value-h");
+
+  // 如果是在双水平弹窗中
+  if (valLInput && valHInput) {
+    const valLStr = valLInput.value.trim();
+    const valHStr = valHInput.value.trim();
+    if (!valLStr && !valHStr) {
+      toast("error", "请至少输入一个水平的测定值");
+      return;
+    }
+    const curSeq = parseInt(entryField("ef-seq").value || "1");
+    const op = (entryField("ef-operator")?.value || "").trim() || null;
+    const pp = (entryField("ef-pre-processor")?.value || "").trim() || null;
+    const note = (entryField("ef-note")?.value || "").trim() || null;
+    const lot = (entryField("ef-lot")?.value || "").trim() || it.lot;
+    const date = entryField("ef-date")?.value;
+
+    const tidL = parseInt(valLInput.dataset.tid);
+    const tidH = parseInt(valHInput.dataset.tid);
+
+    let savedCount = 0;
+    let lastM = null;
+
+    try {
+      if (valLStr) {
+        const valL = parseFloat(valLStr);
+        if (isNaN(valL)) throw new Error("低水平测定值格式不正确");
+        const dataL = { date, seq: curSeq, value: valL, lot, level: "L", note, operator: op, pre_processor: pp };
+        lastM = await api("POST", `/api/test_items/${tidL}/measurements`, dataL);
+        savedCount++;
+      }
+      if (valHStr) {
+        const valH = parseFloat(valHStr);
+        if (isNaN(valH)) throw new Error("高水平测定值格式不正确");
+        const dataH = { date, seq: curSeq, value: valH, lot, level: "H", note, operator: op, pre_processor: pp };
+        lastM = await api("POST", `/api/test_items/${tidH}/measurements`, dataH);
+        savedCount++;
+      }
+
+      state.nextSeq = curSeq + 1;
+      toast("success", `已保存 ${savedCount} 条数据`);
+      setStatus(`已录入保存 · 序号=${curSeq} · 状态=${lastM ? lastM.status : "完成"}`);
+      closeModal();
+      await loadMeasurements();
+      refreshChart();
+      loadStats();
+      if (lastM && lastM.status && (lastM.status.startsWith("OutOfControl") || lastM.status.startsWith("失控"))) {
+        openInvestigation(lastM);
+      }
+    } catch (e) {
+      // 错误由 api 提示
+    }
+    return;
+  }
+
+  // 兼容单水平底座容器
   const data = {
-    date: $("ef-date").value,
-    seq: parseInt($("ef-seq").value || "0"),
-    value: parseFloat($("ef-value").value || "0"),
-    lot: $("ef-lot").value.trim() || it.lot,
-    level: $("ef-level").value,
-    note: $("ef-note").value.trim() || null,
-    operator: $("ef-operator").value.trim() || null,
-    pre_processor: $("ef-pre-processor").value.trim() || null,
+    date: entryField("ef-date").value,
+    seq: parseInt(entryField("ef-seq").value || "1"),
+    value: parseFloat(entryField("ef-value").value || "0"),
+    lot: entryField("ef-lot").value.trim() || it.lot,
+    level: entryField("ef-level").value,
+    note: entryField("ef-note").value.trim() || null,
+    operator: entryField("ef-operator").value.trim() || null,
+    pre_processor: entryField("ef-pre-processor").value.trim() || null,
   };
   try {
     const m = await api("POST", `/api/test_items/${it.id}/measurements`, data);
-    toast("success", `已保存 id=${m.id} 状态=${m.status}`);
-    setStatus(`录入 id=${m.id} · 状态=${m.status} · 规则=${m.rules || "—"}`);
+    state.nextSeq = (data.seq || 1) + 1;
+    toast("success", `已保存 #${m.id} [${m.status}]`);
+    setStatus(`已录入 #${m.id} · 状态=${m.status} · 规则=${m.rules || "—"}`);
+    closeModal();
     await loadMeasurements();
     refreshChart();
     loadStats();
-    // 失控 → 弹排查面板
     if (m.status && (m.status.startsWith("OutOfControl") || m.status.startsWith("失控"))) {
       openInvestigation(m);
     }
-  } catch (e) { /* api() 已 toast */ }
+  } catch (e) { /* api() 已提示 */ }
 }
 
 function resetEntry() {
-  $("ef-note").value = "";
-  $("ef-operator").value = "";
-  $("ef-pre-processor").value = "";
-  $("ef-seq").value = "0";
-  $("ef-value").value = state.currentTestItem?.target || 0;
+  const note = entryField("ef-note"); if (note) note.value = "";
+  const op = entryField("ef-operator"); if (op) op.value = "";
+  const pp = entryField("ef-pre-processor"); if (pp) pp.value = "";
+  const seq = entryField("ef-seq"); if (seq) seq.value = String(state.nextSeq || 1);
+  const valL = entryField("ef-value-l"); if (valL) valL.value = "";
+  const valH = entryField("ef-value-h"); if (valH) valH.value = "";
+  const val = entryField("ef-value"); if (val) val.value = state.currentTestItem?.target || 0;
 }
 
 // ============================================================================
-// 弹窗
+// 模态弹窗公共管理
 // ============================================================================
 function showModal(title, bodyHtml, onMount) {
   const root = $("modal-root");
   root.innerHTML = `
     <div class="modal-backdrop" onclick="if(event.target===this) closeModal()">
       <div class="modal">
-        <span class="close" onclick="closeModal()">×</span>
-        <h2>${title}</h2>
+        <h2>
+          <span>${title}</span>
+          <button class="close-btn" onclick="closeModal()">×</button>
+        </h2>
         <div id="modal-body">${bodyHtml}</div>
       </div>
     </div>`;
@@ -609,52 +2014,351 @@ async function saveLab() {
     await api("POST", "/api/lab", { lab_name: name });
     await loadLab();
     closeModal();
-    toast("success", "已保存");
+    toast("success", "实验室名称已保存");
   } catch (e) { /* */ }
 }
 
 async function newProject() {
-  if (state.isLabPending) { toast("error", "请先在系统设置中填入实验室名称"); openLabSettings(); return; }
-  showModal("新建项目", `
-    <div class="form">
-      <div class="form-row"><label>项目名称 *</label><input id="m-p-name"></div>
-      <div class="form-row"><label>简称</label><input id="m-p-short"></div>
-      <div class="form-row"><label>单位</label><input id="m-p-unit"></div>
-      <div class="form-row"><label>厂家</label><input id="m-p-mfr"></div>
-      <div class="form-actions"><button onclick="saveNewProject()">保存</button><button class="secondary" onclick="closeModal()">取消</button></div>
-    </div>
-  `);
-}
-async function saveNewProject() {
-  const data = {
-    name: $("m-p-name").value.trim(),
-    short: $("m-p-short").value.trim(),
-    unit: $("m-p-unit").value.trim(),
-    manufacturer: $("m-p-mfr").value.trim(),
-  };
-  try {
-    const p = await api("POST", "/api/projects", data);
-    closeModal();
-    toast("success", "已创建：" + p.name);
-    await loadProjects();
-    state.currentProjectId = p.id;
-    selectProject(p);
-  } catch (e) {}
+  openIntegratedModal();
 }
 
 async function editProject() {
   const p = state.projects.find(x => x.id === state.currentProjectId);
-  if (!p) { toast("error", "请先选项目"); return; }
-  showModal("编辑项目", `
-    <div class="form">
-      <div class="form-row"><label>项目名称 *</label><input id="m-p-name" value="${p.name || ""}"></div>
-      <div class="form-row"><label>简称</label><input id="m-p-short" value="${p.short || ""}"></div>
-      <div class="form-row"><label>单位</label><input id="m-p-unit" value="${p.unit || ""}"></div>
-      <div class="form-row"><label>厂家</label><input id="m-p-mfr" value="${p.manufacturer || ""}"></div>
-      <div class="form-actions"><button onclick="saveEditProject(${p.id})">保存</button><button class="secondary" onclick="closeModal()">取消</button></div>
+  if (!p) { toast("error", "请先在左侧选择项目"); return; }
+
+  // 加载该项目下的所有检测指标以做全量信息回填
+  let items = [];
+  try {
+    items = await api("GET", `/api/projects/${p.id}/test_items`);
+  } catch (e) {
+    items = [];
+  }
+
+  // 1. 实验室信息：取全局实验室
+  const labName = state.labName || "";
+  // 2. 项目信息：p.name, p.short, p.manufacturer
+  const projName = p.name || "";
+  const projShort = p.short || "";
+  const projMfr = p.manufacturer || (items[0]?.manufacturer || "");
+
+  // 3. 检测人员信息：从各个检测指标的 pre_processor 和 operator 中解析并去重拆分
+  const preProcSet = new Set();
+  const operSet = new Set();
+  items.forEach(it => {
+    if (it.pre_processor) {
+      it.pre_processor.split(/[、,，\s]+/).map(s => s.trim()).filter(Boolean).forEach(s => preProcSet.add(s));
+    }
+    if (it.operator) {
+      it.operator.split(/[、,，\s]+/).map(s => s.trim()).filter(Boolean).forEach(s => operSet.add(s));
+    }
+  });
+  const preProcList = Array.from(preProcSet);
+  if (preProcList.length === 0) preProcList.push("");
+  const operList = Array.from(operSet);
+  if (operList.length === 0) operList.push("");
+
+  // 4. 将 items 按 指标名称 聚合成卡片（每个指标聚合 L 与 H 双水平）
+  integItems = [];
+  const itemMap = new Map();
+  items.forEach(it => {
+    const key = it.name;
+    if (!itemMap.has(key)) {
+      itemMap.set(key, {
+        name: it.name,
+        lot: it.lot || "LOT2026A",
+        itemL: null,
+        itemH: null,
+      });
+    }
+    const grp = itemMap.get(key);
+    if (it.level === "L") {
+      grp.itemL = it;
+      if (it.lot) grp.lot = it.lot;
+    } else if (it.level === "H") {
+      grp.itemH = it;
+      if (it.lot) grp.lot = it.lot;
+    }
+  });
+
+  let cardId = 1;
+  itemMap.forEach(grp => {
+    const lVal = grp.itemL ? grp.itemL.target : 40.0;
+    const lSdVal = grp.itemL ? grp.itemL.sd : 2.0;
+    const hVal = grp.itemH ? grp.itemH.target : 120.0;
+    const hSdVal = grp.itemH ? grp.itemH.sd : 6.0;
+    integItems.push({
+      id: cardId++,
+      name: grp.name,
+      lot: grp.lot,
+      mode: "manual",
+      lTarget: lVal,
+      lSd: lSdVal,
+      hTarget: hVal,
+      hSd: hSdVal,
+      calcReport: "",
+      itemLId: grp.itemL?.id || null,
+      itemHId: grp.itemH?.id || null,
+    });
+  });
+
+  // 如果原本无指标，默认给一张空卡片
+  if (integItems.length === 0) {
+    integItems.push({
+      id: 1,
+      name: p.name,
+      lot: "LOT2026A",
+      mode: "manual",
+      lTarget: 40.0,
+      lSd: 2.0,
+      hTarget: 120.0,
+      hSd: 6.0,
+      calcReport: "",
+      itemLId: null,
+      itemHId: null,
+    });
+  }
+
+  const defaultLot = integItems[0]?.lot || "LOT2026A";
+
+  const preProcRowsHtml = preProcList.map(name => `
+    <div class="person-row">
+      <input class="person-input pre-processor" value="${escapeHtml(name)}" placeholder="填入前处理人员姓名">
+      <button class="secondary" style="height:30px; padding:0 8px;" onclick="removePersonRow(this)">✕</button>
     </div>
-  `);
+  `).join("");
+
+  const operRowsHtml = operList.map(name => `
+    <div class="person-row">
+      <input class="person-input operator" value="${escapeHtml(name)}" placeholder="填入仪器操作人员姓名">
+      <button class="secondary" style="height:30px; padding:0 8px;" onclick="removePersonRow(this)">✕</button>
+    </div>
+  `).join("");
+
+  const html = `
+    <div style="font-size:12px; max-height:78vh; overflow-y:auto; padding-right:4px;">
+      <!-- 1. 实验室设置 -->
+      <div style="background:#f8fafc; border:1px solid var(--slate-200); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:10px;">
+        <div style="font-weight:600; color:var(--slate-800); margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          1. 实验室信息（全局抬头）
+        </div>
+        <div class="form-row">
+          <label>实验室名称 *</label>
+          <input id="integ-lab-name" value="${escapeHtml(labName)}" placeholder="如：XX医院中心实验室">
+        </div>
+      </div>
+
+      <!-- 2. 检验项目信息（已去掉检测单位） -->
+      <div style="background:#f8fafc; border:1px solid var(--slate-200); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:10px;">
+        <div style="font-weight:600; color:var(--slate-800); margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          2. 检验项目信息
+        </div>
+        <div class="form-row"><label>项目名称 *</label><input id="integ-proj-name" value="${escapeHtml(projName)}" placeholder="如：肝功能全套 / 生化组合"></div>
+        <div class="form-row"><label>项目简称</label><input id="integ-proj-short" value="${escapeHtml(projShort)}" placeholder="如：LFT（可选）"></div>
+      </div>
+
+      <!-- 3. 质控品通用信息与多指标质控限配置 -->
+      <div style="background:#f8fafc; border:1px solid var(--slate-200); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:10px;">
+        <div style="font-weight:600; color:var(--slate-800); margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;">
+          <span style="display:flex; align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            3. 质控品信息与检测指标（支持一项目多指标）
+          </span>
+          <div style="display:flex; gap:6px;">
+            <input type="file" id="batch-multi-sheet-file" accept=".xlsx" style="display:none" onchange="onUploadMultiSheetCalcFile(event)">
+            <button class="secondary" style="height:26px; padding:0 8px; font-size:11px; color:#1d4ed8; background:#eff6ff; border-color:#93c5fd;" onclick="document.getElementById('batch-multi-sheet-file').click()" title="上传包含多个指标Sheet的Excel文件，系统自动解析并计算每个指标的L/H双水平靶值与SD">
+              📁 上传多Sheet Excel测算全部指标
+            </button>
+            <button class="secondary" style="height:26px; padding:0 8px; font-size:11px;" onclick="addIntegItemCard()">
+              ＋ 添加指标
+            </button>
+          </div>
+        </div>
+
+        <!-- 质控品通用配置 -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; background:#fff; padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--slate-200);">
+          <div class="form-row" style="margin:0;"><label style="width:68px;">生产厂家</label><input id="integ-ti-mfr" value="${escapeHtml(projMfr)}" placeholder="如：罗氏诊断（可选）"></div>
+          <div class="form-row" style="margin:0;"><label style="width:68px;">默认批号 *</label><input id="integ-default-lot" value="${escapeHtml(defaultLot)}" placeholder="如：LOT2026A" onchange="syncDefaultLot(this.value)"></div>
+        </div>
+
+        <div id="multi-sheet-tips" style="font-size:11px; color:#1e40af; background:#eff6ff; border:1px dashed #bfdbfe; border-radius:var(--radius-sm); padding:6px 10px; margin-bottom:10px; display:none;"></div>
+        
+        <!-- 动态检测指标列表容器 -->
+        <div id="integ-items-container"></div>
+      </div>
+
+      <!-- 4. 检测人员信息（一人一框，可加多个人） -->
+      <div style="background:#f8fafc; border:1px solid var(--slate-200); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:12px;">
+        <div style="font-weight:600; color:var(--slate-800); margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          4. 检测人员信息
+        </div>
+        
+        <!-- 前处理人员 -->
+        <div style="margin-bottom:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span style="font-size:11.5px; font-weight:500; color:var(--slate-700);">前处理人员（一人一框）：</span>
+            <button class="secondary" style="height:22px; padding:0 6px; font-size:11px;" onclick="addPersonRow('pre_processor')">＋ 添加人员</button>
+          </div>
+          <div id="integ-pre-processor-list">
+            ${preProcRowsHtml}
+          </div>
+        </div>
+
+        <!-- 仪器操作人员 -->
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span style="font-size:11.5px; font-weight:500; color:var(--slate-700);">仪器操作人员（一人一框）：</span>
+            <button class="secondary" style="height:22px; padding:0 6px; font-size:11px;" onclick="addPersonRow('operator')">＋ 添加人员</button>
+          </div>
+          <div id="integ-operator-list">
+            ${operRowsHtml}
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions" style="border-top:1px solid var(--slate-200); padding-top:10px;">
+        <button style="flex:1;" onclick="saveIntegratedEdit(${p.id})">保存修改</button>
+        <button class="secondary" onclick="closeModal()">取消</button>
+      </div>
+    </div>
+  `;
+
+  showModal(`编辑检验项目 —— ${p.name}`, html, () => {
+    renderIntegItems();
+  });
 }
+
+async function saveIntegratedEdit(projectId) {
+  const labName = $("integ-lab-name").value.trim();
+  const projName = $("integ-proj-name").value.trim();
+  const projShort = $("integ-proj-short").value.trim();
+  const projMfr = $("integ-ti-mfr").value.trim();
+
+  // 收集前处理人员与操作人员列表（一人一框）
+  const preProcessors = Array.from(document.querySelectorAll(".person-input.pre-processor"))
+    .map(inp => inp.value.trim())
+    .filter(Boolean);
+  const operators = Array.from(document.querySelectorAll(".person-input.operator"))
+    .map(inp => inp.value.trim())
+    .filter(Boolean);
+
+  const preProcessorStr = preProcessors.join("、") || null;
+  const operatorStr = operators.join("、") || null;
+
+  // 1. 基础校验
+  if (!labName) { toast("error", "实验室名称不能为空"); return; }
+  if (!projName) { toast("error", "项目名称不能为空"); return; }
+  if (integItems.length === 0) { toast("error", "请至少配置一个检测指标"); return; }
+
+  // 校验每个指标
+  for (let idx = 0; idx < integItems.length; idx++) {
+    const item = integItems[idx];
+    const itemName = $(`item-name-${item.id}`) ? $(`item-name-${item.id}`).value.trim() : item.name;
+    const itemLot = $(`item-lot-${item.id}`) ? $(`item-lot-${item.id}`).value.trim() : item.lot;
+    const lTarget = $(`l-target-${item.id}`) ? parseFloat($(`l-target-${item.id}`).value) : item.lTarget;
+    const lSd = $(`l-sd-${item.id}`) ? parseFloat($(`l-sd-${item.id}`).value) : item.lSd;
+    const hTarget = $(`h-target-${item.id}`) ? parseFloat($(`h-target-${item.id}`).value) : item.hTarget;
+    const hSd = $(`h-sd-${item.id}`) ? parseFloat($(`h-sd-${item.id}`).value) : item.hSd;
+
+    if (!itemName) { toast("error", `检测指标 #${idx + 1} 的指标名称不能为空`); return; }
+    if (!itemLot) { toast("error", `检测指标「${itemName}」的批号不能为空`); return; }
+    if (isNaN(lTarget) || lTarget <= 0 || isNaN(lSd) || lSd <= 0) {
+      toast("error", `指标「${itemName}」的低水平 (L) 靶值与 SD 必须大于 0`); return;
+    }
+    if (isNaN(hTarget) || hTarget <= 0 || isNaN(hSd) || hSd <= 0) {
+      toast("error", `指标「${itemName}」的高水平 (H) 靶值与 SD 必须大于 0`); return;
+    }
+    item.name = itemName;
+    item.lot = itemLot;
+    item.lTarget = lTarget;
+    item.lSd = lSd;
+    item.hTarget = hTarget;
+    item.hSd = hSd;
+  }
+
+  try {
+    setStatus("正在保存项目与指标修改…");
+    // (1) 保存实验室名称
+    await api("POST", "/api/lab", { lab_name: labName });
+    await loadLab();
+
+    // (2) 更新项目信息
+    const p = await api("PUT", `/api/projects/${projectId}`, {
+      name: projName,
+      short: projShort || null,
+      unit: null,
+      manufacturer: projMfr || null,
+    });
+
+    // (3) 逐项更新或新建指标
+    let firstItem = null;
+    for (const item of integItems) {
+      // 低水平 L
+      if (item.itemLId) {
+        const updatedL = await api("PUT", `/api/test_items/${item.itemLId}`, {
+          name: item.name,
+          lot: item.lot,
+          target: item.lTarget,
+          sd: item.lSd,
+          manufacturer: projMfr || null,
+          operator: operatorStr,
+          pre_processor: preProcessorStr,
+        });
+        if (!firstItem) firstItem = updatedL;
+      } else {
+        const createdL = await api("POST", `/api/projects/${projectId}/test_items`, {
+          name: item.name,
+          level: "L",
+          lot: item.lot,
+          target: item.lTarget,
+          sd: item.lSd,
+          manufacturer: projMfr || null,
+          operator: operatorStr,
+          pre_processor: preProcessorStr,
+        });
+        if (!firstItem) firstItem = createdL;
+      }
+
+      // 高水平 H
+      if (item.itemHId) {
+        const updatedH = await api("PUT", `/api/test_items/${item.itemHId}`, {
+          name: item.name,
+          lot: item.lot,
+          target: item.hTarget,
+          sd: item.hSd,
+          manufacturer: projMfr || null,
+          operator: operatorStr,
+          pre_processor: preProcessorStr,
+        });
+        if (!firstItem) firstItem = updatedH;
+      } else {
+        const createdH = await api("POST", `/api/projects/${projectId}/test_items`, {
+          name: item.name,
+          level: "H",
+          lot: item.lot,
+          target: item.hTarget,
+          sd: item.hSd,
+          manufacturer: projMfr || null,
+          operator: operatorStr,
+          pre_processor: preProcessorStr,
+        });
+        if (!firstItem) firstItem = createdH;
+      }
+    }
+
+    closeModal();
+    toast("success", `项目「${p.name}」已更新，所有指标与人员信息已同步保存！`);
+    await loadProjects();
+    const refreshed = state.projects.find(x => x.id === projectId);
+    if (refreshed) await selectProject(refreshed);
+    if (firstItem) selectTestItem(firstItem);
+  } catch (e) {
+    toast("error", "保存失败: " + (e?.message || e));
+  }
+}
+
 async function saveEditProject(pid) {
   const data = {
     name: $("m-p-name").value.trim(),
@@ -665,7 +2369,7 @@ async function saveEditProject(pid) {
   try {
     const p = await api("PUT", `/api/projects/${pid}`, data);
     closeModal();
-    toast("success", "已保存：" + p.name);
+    toast("success", "项目已更新：" + p.name);
     await loadProjects();
     const refreshed = state.projects.find(x => x.id === pid);
     if (refreshed) selectProject(refreshed);
@@ -675,12 +2379,12 @@ async function saveEditProject(pid) {
 async function deleteProject() {
   const p = state.projects.find(x => x.id === state.currentProjectId);
   if (!p) { toast("error", "请先选项目"); return; }
-  if (!confirm(`确认删除项目「${p.name}」？\n（其下指标与测量会一并删除，失控记录按 §8.3 c 保留）`)) return;
+  if (!confirm(`确认删除检验项目「${p.name}」？\n\n警告：其下所有检测指标与测量值将级联删除，失控记录将保留。`)) return;
   try {
     const summary = await api("DELETE", `/api/projects/${p.id}`);
-    closeModal && closeModal();
+    closeModal();
     toast("success",
-      `已删除：${summary.n_test_items} 个指标 / ${summary.n_measurements} 条 measurement / ${summary.n_out_of_control} 条失控记录保留`);
+      `已删除：${summary.n_test_items} 个指标 / ${summary.n_measurements} 条测量记录`);
     state.currentProjectId = null;
     state.currentTestItemId = null;
     state.currentTestItem = null;
@@ -689,17 +2393,17 @@ async function deleteProject() {
 }
 
 async function newTestItem() {
-  if (!state.currentProjectId) { toast("error", "请先选项目"); return; }
+  if (!state.currentProjectId) { toast("error", "请先选择检验项目"); return; }
   showModal("新建检测指标", `
     <div class="form">
-      <div class="form-row"><label>名称 *</label><input id="m-ti-name"></div>
+      <div class="form-row"><label>指标名称 *</label><input id="m-ti-name" placeholder="如：ALT"></div>
       <div class="form-row"><label>水平 *</label><select id="m-ti-level"><option>L</option><option>H</option></select></div>
       <div class="form-row"><label>批号 *</label><input id="m-ti-lot" value="LOT1"></div>
       <div class="form-row"><label>靶值 *</label><input type="number" id="m-ti-target" value="5.0" step="0.001"></div>
       <div class="form-row"><label>SD *</label><input type="number" id="m-ti-sd" value="0.2" step="0.001"></div>
-      <div class="form-row"><label>单位</label><input id="m-ti-unit"></div>
-      <div class="form-row"><label>厂家</label><input id="m-ti-mfr"></div>
-      <div class="form-actions"><button onclick="saveNewTestItem()">保存</button><button class="secondary" onclick="closeModal()">取消</button></div>
+      <div class="form-row"><label>单位</label><input id="m-ti-unit" placeholder="可选"></div>
+      <div class="form-row"><label>厂家</label><input id="m-ti-mfr" placeholder="可选"></div>
+      <div class="form-actions"><button onclick="saveNewTestItem()">保存指标</button><button class="secondary" onclick="closeModal()">取消</button></div>
     </div>
   `);
 }
@@ -726,14 +2430,19 @@ async function saveNewTestItem() {
 async function editTestItem() {
   const it = state.currentTestItem;
   if (!it) { toast("error", "请先选指标"); return; }
-  // 简化版 modal：只让改靶值/SD/单位/厂家（按 spec §A.3 允许字段）
   showModal("编辑检测指标", `
     <div class="form">
       <div class="form-row"><label>靶值 *</label><input type="number" id="m-e-ti-target" value="${it.target}" step="0.001" min="0.001"></div>
       <div class="form-row"><label>SD *</label><input type="number" id="m-e-ti-sd" value="${it.sd}" step="0.001" min="0.001"></div>
-      <div class="form-row"><label>单位</label><input id="m-e-ti-unit" value="${it.unit || ""}"></div>
-      <div class="form-row"><label>厂家</label><input id="m-e-ti-mfr" value="${it.manufacturer || ""}"></div>
-      <div class="form-actions"><button onclick="saveEditTestItem(${it.id})">保存</button><button class="secondary" onclick="closeModal()">取消</button></div>
+      <div class="form-row"><label>统计模式</label>
+        <select id="m-e-ti-source">
+          <option value="固定"${(it.source || "固定") === "固定" ? " selected" : ""}>固定（用靶值/SD）</option>
+          <option value="累计"${it.source === "累计" ? " selected" : ""}>累计（按历史重算）</option>
+        </select>
+      </div>
+      <div class="form-row"><label>单位</label><input id="m-e-ti-unit" value="${escapeHtml(it.unit || "")}"></div>
+      <div class="form-row"><label>厂家</label><input id="m-e-ti-mfr" value="${escapeHtml(it.manufacturer || "")}"></div>
+      <div class="form-actions"><button onclick="saveEditTestItem(${it.id})">保存修改</button><button class="secondary" onclick="closeModal()">取消</button></div>
     </div>
   `);
 }
@@ -741,14 +2450,14 @@ async function saveEditTestItem(tid) {
   const data = {
     target: parseFloat($("m-e-ti-target").value),
     sd: parseFloat($("m-e-ti-sd").value),
+    source: $("m-e-ti-source").value,
     unit: $("m-e-ti-unit").value.trim() || null,
     manufacturer: $("m-e-ti-mfr").value.trim() || null,
   };
   try {
     const ti = await api("PUT", `/api/test_items/${tid}`, data);
     closeModal();
-    toast("success", "已保存");
-    // 刷新指标列表 + 选回当前
+    toast("success", "检测指标已保存");
     const p = state.projects.find(x => x.id === state.currentProjectId);
     if (p) selectProject(p);
   } catch (e) { /* api() 已 toast */ }
@@ -757,11 +2466,10 @@ async function saveEditTestItem(tid) {
 async function deleteTestItem() {
   const it = state.currentTestItem;
   if (!it) { toast("error", "请先选指标"); return; }
-  if (!confirm(`确认删除检测指标「${it.name} · ${it.lot} · ${it.level}」？\nmeasurements 会一并删除，失控记录按 §8.3 c 保留`)) return;
+  if (!confirm(`确认删除检测指标「${it.name} · ${it.lot} · ${it.level}」？\n\n测量记录将一并删除，失控记录予以保留。`)) return;
   try {
     const summary = await api("DELETE", `/api/test_items/${it.id}`);
-    toast("success",
-      `已删除：${summary.n_measurements} 条 measurement / ${summary.n_out_of_control} 条失控记录保留`);
+    toast("success", `已删除：${summary.n_measurements} 条测量记录`);
     state.currentTestItemId = null;
     state.currentTestItem = null;
     const p = state.projects.find(x => x.id === state.currentProjectId);
@@ -774,10 +2482,10 @@ async function addLot() {
   if (!it) { toast("error", "请先选指标"); return; }
   showModal(`为 ${it.name}（${it.level}）添加新批号`, `
     <div class="form">
-      <div class="form-row"><label>新批号 *</label><input id="m-al-lot"></div>
-      <div class="form-row"><label>靶值 *</label><input type="number" id="m-al-target" value="${it.target}" step="0.001" min="0.001"></div>
-      <div class="form-row"><label>SD *</label><input type="number" id="m-al-sd" value="${it.sd}" step="0.001" min="0.001"></div>
-      <div class="form-actions"><button onclick="saveAddLot(${it.id})">保存</button><button class="secondary" onclick="closeModal()">取消</button></div>
+      <div class="form-row"><label>新批号 *</label><input id="m-al-lot" placeholder="如：LOT2026B"></div>
+      <div class="form-row"><label>新靶值 *</label><input type="number" id="m-al-target" value="${it.target}" step="0.001" min="0.001"></div>
+      <div class="form-row"><label>新 SD *</label><input type="number" id="m-al-sd" value="${it.sd}" step="0.001" min="0.001"></div>
+      <div class="form-actions"><button onclick="saveAddLot(${it.id})">保存新批号</button><button class="secondary" onclick="closeModal()">取消</button></div>
     </div>
   `);
 }
@@ -798,41 +2506,570 @@ async function saveAddLot(tid) {
 }
 
 // ============================================================================
-// 排查面板（功能 F：失控后弹）
+// 一体化建档（实验室 + 检验项目 + 质控品多指标(L/H双水平/多Sheet测算) + 检测人员）
+// ============================================================================
+let integItems = [];
+
+function openIntegratedModal() {
+  const currentLab = state.labName || "";
+  integItems = [
+    { id: 1, name: "ALT", lot: "LOT2026A", mode: "manual", lTarget: 40.0, lSd: 2.0, hTarget: 120.0, hSd: 6.0, calcReport: "" }
+  ];
+
+  const html = `
+    <div style="font-size:12px; max-height:78vh; overflow-y:auto; padding-right:4px;">
+      <!-- 1. 实验室设置 -->
+      <div style="background:#f8fafc; border:1px solid var(--slate-200); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:10px;">
+        <div style="font-weight:600; color:var(--slate-800); margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          1. 实验室信息（全局抬头）
+        </div>
+        <div class="form-row">
+          <label>实验室名称 *</label>
+          <input id="integ-lab-name" value="${escapeHtml(currentLab)}" placeholder="如：XX医院中心实验室">
+        </div>
+      </div>
+
+      <!-- 2. 检验项目信息（已去掉检测单位） -->
+      <div style="background:#f8fafc; border:1px solid var(--slate-200); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:10px;">
+        <div style="font-weight:600; color:var(--slate-800); margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+          2. 检验项目信息
+        </div>
+        <div class="form-row"><label>项目名称 *</label><input id="integ-proj-name" placeholder="如：肝功能全套 / 生化组合"></div>
+        <div class="form-row"><label>项目简称</label><input id="integ-proj-short" placeholder="如：LFT（可选）"></div>
+      </div>
+
+      <!-- 3. 质控品通用信息与多指标质控限配置 -->
+      <div style="background:#f8fafc; border:1px solid var(--slate-200); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:10px;">
+        <div style="font-weight:600; color:var(--slate-800); margin-bottom:8px; display:flex; align-items:center; justify-content:space-between;">
+          <span style="display:flex; align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+            3. 质控品信息与检测指标（支持一项目多指标）
+          </span>
+          <div style="display:flex; gap:6px;">
+            <input type="file" id="batch-multi-sheet-file" accept=".xlsx" style="display:none" onchange="onUploadMultiSheetCalcFile(event)">
+            <button class="secondary" style="height:26px; padding:0 8px; font-size:11px; color:#1d4ed8; background:#eff6ff; border-color:#93c5fd;" onclick="document.getElementById('batch-multi-sheet-file').click()" title="上传包含多个指标Sheet的Excel文件，系统自动解析并计算每个指标的L/H双水平靶值与SD">
+              📁 上传多Sheet Excel测算全部指标
+            </button>
+            <button class="secondary" style="height:26px; padding:0 8px; font-size:11px;" onclick="addIntegItemCard()">
+              ＋ 添加指标
+            </button>
+          </div>
+        </div>
+
+        <!-- 质控品通用配置 -->
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; background:#fff; padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--slate-200);">
+          <div class="form-row" style="margin:0;"><label style="width:68px;">生产厂家</label><input id="integ-ti-mfr" placeholder="如：罗氏诊断（可选）"></div>
+          <div class="form-row" style="margin:0;"><label style="width:68px;">默认批号 *</label><input id="integ-default-lot" value="LOT2026A" placeholder="如：LOT2026A" onchange="syncDefaultLot(this.value)"></div>
+        </div>
+
+        <div id="multi-sheet-tips" style="font-size:11px; color:#1e40af; background:#eff6ff; border:1px dashed #bfdbfe; border-radius:var(--radius-sm); padding:6px 10px; margin-bottom:10px; display:none;"></div>
+        
+        <!-- 动态检测指标列表容器 -->
+        <div id="integ-items-container"></div>
+      </div>
+
+      <!-- 4. 检测人员信息（一人一框，可加多个人） -->
+      <div style="background:#f8fafc; border:1px solid var(--slate-200); border-radius:var(--radius-md); padding:10px 12px; margin-bottom:12px;">
+        <div style="font-weight:600; color:var(--slate-800); margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          4. 检测人员信息
+        </div>
+        
+        <!-- 前处理人员 -->
+        <div style="margin-bottom:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span style="font-size:11.5px; font-weight:500; color:var(--slate-700);">前处理人员（一人一框）：</span>
+            <button class="secondary" style="height:22px; padding:0 6px; font-size:11px;" onclick="addPersonRow('pre_processor')">＋ 添加人员</button>
+          </div>
+          <div id="integ-pre-processor-list">
+            <div class="person-row">
+              <input class="person-input pre-processor" placeholder="填入前处理人员姓名">
+              <button class="secondary" style="height:30px; padding:0 8px;" onclick="removePersonRow(this)">✕</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 仪器操作人员 -->
+        <div>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span style="font-size:11.5px; font-weight:500; color:var(--slate-700);">仪器操作人员（一人一框）：</span>
+            <button class="secondary" style="height:22px; padding:0 6px; font-size:11px;" onclick="addPersonRow('operator')">＋ 添加人员</button>
+          </div>
+          <div id="integ-operator-list">
+            <div class="person-row">
+              <input class="person-input operator" placeholder="填入仪器操作人员姓名">
+              <button class="secondary" style="height:30px; padding:0 8px;" onclick="removePersonRow(this)">✕</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-actions" style="border-top:1px solid var(--slate-200); padding-top:10px;">
+        <button style="flex:1;" onclick="saveIntegratedAll()">确认一键建立</button>
+        <button class="secondary" onclick="closeModal()">取消</button>
+      </div>
+    </div>
+  `;
+  showModal("新建项目向导 (项目 + 多指标 + L/H双水平质控限 + 检测人员)", html, () => {
+    renderIntegItems();
+  });
+}
+
+function syncDefaultLot(val) {
+  const v = val.trim();
+  if (!v) return;
+  integItems.forEach(it => {
+    if (!it.lot || it.lot === "LOT2026A") {
+      it.lot = v;
+      const el = $(`item-lot-${it.id}`);
+      if (el) el.value = v;
+    }
+  });
+}
+
+function renderIntegItems() {
+  const container = $("integ-items-container");
+  if (!container) return;
+  container.innerHTML = "";
+  integItems.forEach((item, idx) => {
+    const card = document.createElement("div");
+    card.className = "lot-card";
+    card.innerHTML = `
+      <div class="lot-card-header">
+        <span class="lot-card-title">检测指标 #${idx + 1}（L/H 双水平质控限）</span>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <button class="calc-tab-btn ${item.mode === 'manual' ? 'active' : ''}" onclick="switchItemMode(${item.id}, 'manual')">手动输入</button>
+          <button class="calc-tab-btn ${item.mode === 'calc' ? 'active' : ''}" onclick="switchItemMode(${item.id}, 'calc')">上传 Excel 测算</button>
+          ${integItems.length > 1 ? `<button class="secondary" style="height:22px; padding:0 6px; font-size:11px; color:var(--danger);" onclick="removeIntegItemCard(${item.id})">删除</button>` : ''}
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:8px;">
+        <div class="form-row" style="margin:0;">
+          <label style="width:68px;">指标名称 *</label>
+          <input id="item-name-${item.id}" value="${escapeHtml(item.name || '')}" placeholder="如：ALT / AST" onchange="updateItemData(${item.id}, 'name', this.value)">
+        </div>
+        <div class="form-row" style="margin:0;">
+          <label style="width:68px;">质控批号 *</label>
+          <input id="item-lot-${item.id}" value="${escapeHtml(item.lot || '')}" placeholder="如：LOT2026A" onchange="updateItemData(${item.id}, 'lot', this.value)">
+        </div>
+      </div>
+
+      ${item.mode === 'calc' ? `
+        <div style="background:#eff6ff; border:1px dashed #93c5fd; border-radius:var(--radius-sm); padding:8px 10px; margin-bottom:8px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-size:11px; color:#1e40af; font-weight:500;">选择包含 ${escapeHtml(item.name || '该指标')} 历史测定值的 Excel 文件：</span>
+            <input type="file" id="calc-file-${item.id}" accept=".xlsx" style="display:none" onchange="onUploadSingleItemCalcFile(event, ${item.id})">
+            <button class="secondary" style="height:24px; padding:0 8px; font-size:11px;" onclick="document.getElementById('calc-file-${item.id}').click()">选择 .xlsx 文件</button>
+          </div>
+          <div id="calc-report-${item.id}" style="margin-top:6px; font-size:11px; color:#1e40af;">${item.calcReport || '等待上传文件测算靶值与SD…'}</div>
+        </div>
+      ` : ''}
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <!-- 低水平 L -->
+        <div style="border:1px solid #bfdbfe; background:#eff6ff; border-radius:var(--radius-sm); padding:8px;">
+          <div style="font-weight:600; color:#1e40af; margin-bottom:6px; display:flex; justify-content:space-between;">
+            <span>低水平 (L)</span>
+            <span style="font-size:10px; font-weight:normal; color:#3b82f6;">低值质控限</span>
+          </div>
+          <div class="form-row"><label style="width:52px;">靶值 *</label><input type="number" id="l-target-${item.id}" value="${item.lTarget}" step="0.001" onchange="updateItemData(${item.id}, 'lTarget', parseFloat(this.value))"></div>
+          <div class="form-row"><label style="width:52px;">SD *</label><input type="number" id="l-sd-${item.id}" value="${item.lSd}" step="0.001" onchange="updateItemData(${item.id}, 'lSd', parseFloat(this.value))"></div>
+        </div>
+
+        <!-- 高水平 H -->
+        <div style="border:1px solid #fbcfe8; background:#fdf2f8; border-radius:var(--radius-sm); padding:8px;">
+          <div style="font-weight:600; color:#9d174d; margin-bottom:6px; display:flex; justify-content:space-between;">
+            <span>高水平 (H)</span>
+            <span style="font-size:10px; font-weight:normal; color:#ec4899;">高值质控限</span>
+          </div>
+          <div class="form-row"><label style="width:52px;">靶值 *</label><input type="number" id="h-target-${item.id}" value="${item.hTarget}" step="0.001" onchange="updateItemData(${item.id}, 'hTarget', parseFloat(this.value))"></div>
+          <div class="form-row"><label style="width:52px;">SD *</label><input type="number" id="h-sd-${item.id}" value="${item.hSd}" step="0.001" onchange="updateItemData(${item.id}, 'hSd', parseFloat(this.value))"></div>
+        </div>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function addIntegItemCard() {
+  const newId = integItems.length > 0 ? Math.max(...integItems.map(x => x.id)) + 1 : 1;
+  const defaultLot = ($("integ-default-lot") ? $("integ-default-lot").value.trim() : "") || "LOT2026A";
+  integItems.push({
+    id: newId,
+    name: `指标${integItems.length + 1}`,
+    lot: defaultLot,
+    mode: "manual",
+    lTarget: 40.0,
+    lSd: 2.0,
+    hTarget: 120.0,
+    hSd: 6.0,
+    calcReport: ""
+  });
+  renderIntegItems();
+}
+
+function removeIntegItemCard(id) {
+  if (integItems.length <= 1) {
+    toast("error", "至少需要保留一个检测指标");
+    return;
+  }
+  integItems = integItems.filter(x => x.id !== id);
+  renderIntegItems();
+}
+
+function switchItemMode(id, mode) {
+  const item = integItems.find(x => x.id === id);
+  if (item) {
+    item.mode = mode;
+    renderIntegItems();
+  }
+}
+
+function updateItemData(id, key, val) {
+  const item = integItems.find(x => x.id === id);
+  if (item) item[key] = val;
+}
+
+// 单指标 Excel 测算
+async function onUploadSingleItemCalcFile(ev, itemId) {
+  const f = ev.target.files[0];
+  ev.target.value = "";
+  if (!f) return;
+  if (!f.name.toLowerCase().endsWith(".xlsx")) {
+    toast("error", "只支持上传 .xlsx 格式的 Excel 数据文件");
+    return;
+  }
+
+  const reportEl = $(`calc-report-${itemId}`);
+  if (reportEl) reportEl.textContent = `正在测算 ${f.name}…`;
+
+  const fd = new FormData();
+  fd.append("file", f);
+
+  try {
+    const res = await fetch("/api/calculate_target_sd", {
+      method: "POST",
+      body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const err = data.error || "测算接口异常";
+      if (reportEl) reportEl.innerHTML = `<span style="color:var(--danger)">测算失败：${escapeHtml(err)}</span>`;
+      toast("error", "测算失败：" + err);
+      return;
+    }
+
+    const item = integItems.find(x => x.id === itemId);
+    if (!item) return;
+
+    // 智能选择对应的 Sheet 数据
+    let targetData = data;
+    let matchedSheetName = "";
+    if (data.sheets) {
+      const sheetKeys = Object.keys(data.sheets);
+      const curName = (item.name || "").trim().toLowerCase();
+      // 1. 优先匹配当前卡片的指标名
+      const foundKey = sheetKeys.find(k => k.toLowerCase() === curName || k.toLowerCase().includes(curName) || (curName && curName.includes(k.toLowerCase())));
+      if (foundKey) {
+        targetData = data.sheets[foundKey];
+        matchedSheetName = foundKey;
+      } else if (sheetKeys.length > 0) {
+        // 2. 默认使用第一个 Sheet
+        targetData = data.sheets[sheetKeys[0]];
+        matchedSheetName = sheetKeys[0];
+      }
+      // 如果当前卡片名称还是默认的“指标X”，自动更新为 Sheet 名称
+      if ((!item.name || item.name.startsWith("指标")) && matchedSheetName) {
+        item.name = matchedSheetName;
+        const nameInput = $(`item-name-${itemId}`);
+        if (nameInput) nameInput.value = matchedSheetName;
+      }
+    }
+
+    let msgBits = [];
+    const lvlL = targetData.L || data.L;
+    const lvlH = targetData.H || data.H;
+
+    if (lvlL) {
+      item.lTarget = lvlL.mean;
+      item.lSd = lvlL.sd;
+      const elT = $(`l-target-${itemId}`);
+      const elS = $(`l-sd-${itemId}`);
+      if (elT) elT.value = lvlL.mean;
+      if (elS) elS.value = lvlL.sd;
+      msgBits.push(`低水平L (N=${lvlL.n}): 靶值=${lvlL.mean}, SD=${lvlL.sd} (CV=${lvlL.cv_pct}%)`);
+    }
+    if (lvlH) {
+      item.hTarget = lvlH.mean;
+      item.hSd = lvlH.sd;
+      const elT = $(`h-target-${itemId}`);
+      const elS = $(`h-sd-${itemId}`);
+      if (elT) elT.value = lvlH.mean;
+      if (elS) elS.value = lvlH.sd;
+      msgBits.push(`高水平H (N=${lvlH.n}): 靶值=${lvlH.mean}, SD=${lvlH.sd} (CV=${lvlH.cv_pct}%)`);
+    }
+
+    let reportText = `✓ 测算成功！${matchedSheetName ? `[${matchedSheetName}] ` : ''}${msgBits.join(' ； ')}`;
+    if (data.is_multi_sheet) {
+      const allSheets = Object.keys(data.sheets || {}).join('、');
+      reportText += ` <br><span style="font-size:10.5px; color:#64748b;">(提示：该文件含多个指标 Sheet: ${allSheets}，如需一键导入全部指标，可点上方「📁 上传多Sheet Excel测算全部指标」)</span>`;
+    }
+    item.calcReport = reportText;
+    if (reportEl) reportEl.innerHTML = `<span style="color:var(--success); font-weight:600;">${reportText}</span>`;
+    toast("success", "靶值与 SD 测算完成并已自动填入！");
+  } catch (e) {
+    if (reportEl) reportEl.innerHTML = `<span style="color:var(--danger)">出错：${escapeHtml(e.message)}</span>`;
+    toast("error", "测算出错: " + e.message);
+  }
+}
+
+// 多 Sheet Excel 一键批量测算并自动生成全部指标卡片
+async function onUploadMultiSheetCalcFile(ev) {
+  const f = ev.target.files[0];
+  ev.target.value = "";
+  if (!f) return;
+  if (!f.name.toLowerCase().endsWith(".xlsx")) {
+    toast("error", "只支持上传 .xlsx 格式的 Excel 数据文件");
+    return;
+  }
+
+  const tipsEl = $("multi-sheet-tips");
+  if (tipsEl) {
+    tipsEl.style.display = "block";
+    tipsEl.textContent = `正在解析 Excel 数据文件 ${f.name}…`;
+  }
+
+  const fd = new FormData();
+  fd.append("file", f);
+
+  try {
+    const res = await fetch("/api/calculate_target_sd", {
+      method: "POST",
+      body: fd,
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      const err = data.error || "测算接口异常";
+      if (tipsEl) tipsEl.innerHTML = `<span style="color:var(--danger)">解析失败：${escapeHtml(err)}</span>`;
+      toast("error", "多 Sheet 解析失败: " + err);
+      return;
+    }
+
+    const defaultLot = ($("integ-default-lot") ? $("integ-default-lot").value.trim() : "") || "LOT2026A";
+    const sheets = data.sheets || {};
+    const sheetKeys = Object.keys(sheets);
+
+    if (sheetKeys.length === 0) {
+      toast("error", "未能从工作表中识别出有效指标数据（每个水平至少需要2条测定值）");
+      return;
+    }
+
+    // 自动重构卡片列表
+    integItems = [];
+    sheetKeys.forEach((sname, idx) => {
+      const sData = sheets[sname];
+      const lMean = sData.L ? sData.L.mean : 40.0;
+      const lSd = sData.L ? sData.L.sd : 2.0;
+      const hMean = sData.H ? sData.H.mean : 120.0;
+      const hSd = sData.H ? sData.H.sd : 6.0;
+      const rep = `✓ 来自Sheet「${sname}」测算：低水平L(N=${sData.L?.n || 0}, 靶值=${lMean}, SD=${lSd}, CV=${sData.L?.cv_pct}%)；高水平H(N=${sData.H?.n || 0}, 靶值=${hMean}, SD=${hSd}, CV=${sData.H?.cv_pct}%)`;
+
+      integItems.push({
+        id: idx + 1,
+        name: sname,
+        lot: defaultLot,
+        mode: "calc",
+        lTarget: lMean,
+        lSd: lSd,
+        hTarget: hMean,
+        hSd: hSd,
+        calcReport: rep
+      });
+    });
+
+    // 如果项目名称为空，自动带出合理默认名
+    const projInput = $("integ-proj-name");
+    if (projInput && !projInput.value.trim()) {
+      const cleanFileName = f.name.replace(/\.[^/.]+$/, "").replace("模版", "").replace("模板", "").trim();
+      projInput.value = cleanFileName || sheetKeys.join("+") + "检测";
+    }
+
+    renderIntegItems();
+    if (tipsEl) {
+      tipsEl.style.display = "block";
+      tipsEl.innerHTML = `<span style="color:var(--success); font-weight:600;">✓ 成功解析 ${sheetKeys.length} 个指标（${escapeHtml(sheetKeys.join('、'))}），已自动生成全部指标卡片并填入高低水平靶值与SD！</span>`;
+    }
+    toast("success", `已自动生成 ${sheetKeys.length} 个检测指标并填入测算值！`);
+  } catch (e) {
+    if (tipsEl) tipsEl.innerHTML = `<span style="color:var(--danger)">出错：${escapeHtml(e.message)}</span>`;
+    toast("error", "解析出错: " + e.message);
+  }
+}
+
+function addPersonRow(type) {
+  const container = $(type === "pre_processor" ? "integ-pre-processor-list" : "integ-operator-list");
+  if (!container) return;
+  const div = document.createElement("div");
+  div.className = "person-row";
+  div.innerHTML = `
+    <input class="person-input ${type}" placeholder="填入${type === 'pre_processor' ? '前处理' : '仪器操作'}人员姓名">
+    <button class="secondary" style="height:30px; padding:0 8px;" onclick="removePersonRow(this)">✕</button>
+  `;
+  container.appendChild(div);
+}
+
+function removePersonRow(btn) {
+  const row = btn.closest(".person-row");
+  const container = row.parentElement;
+  if (container.querySelectorAll(".person-row").length <= 1) {
+    row.querySelector("input").value = "";
+    return;
+  }
+  row.remove();
+}
+
+async function saveIntegratedAll() {
+  const labName = $("integ-lab-name").value.trim();
+  const projName = $("integ-proj-name").value.trim();
+  const projShort = $("integ-proj-short").value.trim();
+  const projMfr = $("integ-ti-mfr").value.trim();
+
+  // 收集前处理人员与操作人员列表（一人一框）
+  const preProcessors = Array.from(document.querySelectorAll(".person-input.pre-processor"))
+    .map(inp => inp.value.trim())
+    .filter(Boolean);
+  const operators = Array.from(document.querySelectorAll(".person-input.operator"))
+    .map(inp => inp.value.trim())
+    .filter(Boolean);
+
+  const preProcessorStr = preProcessors.join("、") || null;
+  const operatorStr = operators.join("、") || null;
+
+  // 1. 基础校验
+  if (!labName) { toast("error", "实验室名称不能为空"); return; }
+  if (!projName) { toast("error", "项目名称不能为空"); return; }
+  if (integItems.length === 0) { toast("error", "请至少配置一个检测指标"); return; }
+
+  // 校验每个指标
+  for (let idx = 0; idx < integItems.length; idx++) {
+    const item = integItems[idx];
+    const itemName = $(`item-name-${item.id}`) ? $(`item-name-${item.id}`).value.trim() : item.name;
+    const itemLot = $(`item-lot-${item.id}`) ? $(`item-lot-${item.id}`).value.trim() : item.lot;
+    const lTarget = $(`l-target-${item.id}`) ? parseFloat($(`l-target-${item.id}`).value) : item.lTarget;
+    const lSd = $(`l-sd-${item.id}`) ? parseFloat($(`l-sd-${item.id}`).value) : item.lSd;
+    const hTarget = $(`h-target-${item.id}`) ? parseFloat($(`h-target-${item.id}`).value) : item.hTarget;
+    const hSd = $(`h-sd-${item.id}`) ? parseFloat($(`h-sd-${item.id}`).value) : item.hSd;
+
+    if (!itemName) { toast("error", `检测指标 #${idx + 1} 的指标名称不能为空`); return; }
+    if (!itemLot) { toast("error", `检测指标「${itemName}」的批号不能为空`); return; }
+    if (isNaN(lTarget) || lTarget <= 0 || isNaN(lSd) || lSd <= 0) {
+      toast("error", `指标「${itemName}」的低水平 (L) 靶值与 SD 必须大于 0`); return;
+    }
+    if (isNaN(hTarget) || hTarget <= 0 || isNaN(hSd) || hSd <= 0) {
+      toast("error", `指标「${itemName}」的高水平 (H) 靶值与 SD 必须大于 0`); return;
+    }
+    item.name = itemName;
+    item.lot = itemLot;
+    item.lTarget = lTarget;
+    item.lSd = lSd;
+    item.hTarget = hTarget;
+    item.hSd = hSd;
+  }
+
+  try {
+    setStatus("正在保存实验室与项目…");
+    // (1) 保存实验室名称
+    await api("POST", "/api/lab", { lab_name: labName });
+    await loadLab();
+
+    // (2) 创建检验项目（已去掉检测单位）
+    const proj = await api("POST", "/api/projects", {
+      name: projName,
+      short: projShort || null,
+      unit: null,
+      manufacturer: projMfr || null,
+    });
+
+    let firstItem = null;
+    // (3) 循环遍历为每个指标级联创建 L / H 双水平指标记录
+    for (const item of integItems) {
+      setStatus(`正在创建指标「${item.name}」的 L/H 双水平记录…`);
+      const itemL = await api("POST", `/api/projects/${proj.id}/test_items`, {
+        name: item.name,
+        level: "L",
+        lot: item.lot,
+        target: item.lTarget,
+        sd: item.lSd,
+        manufacturer: projMfr || null,
+        operator: operatorStr,
+        pre_processor: preProcessorStr,
+      });
+      if (!firstItem) firstItem = itemL;
+
+      await api("POST", `/api/projects/${proj.id}/test_items`, {
+        name: item.name,
+        level: "H",
+        lot: item.lot,
+        target: item.hTarget,
+        sd: item.hSd,
+        manufacturer: projMfr || null,
+        operator: operatorStr,
+        pre_processor: preProcessorStr,
+      });
+    }
+
+    closeModal();
+    toast("success", `新建项目成功：已创建「${proj.name}」及 ${integItems.length} 个检测指标（每个配L/H双水平）！`);
+    await loadProjects();
+    state.currentProjectId = proj.id;
+    await selectProject(proj);
+    if (firstItem) selectTestItem(firstItem);
+  } catch (e) {
+    toast("error", "新建项目建档失败: " + (e?.message || e));
+  }
+}
+
+// ============================================================================
+// 失控排查面板（spec §F.1 / §F.2）
 // ============================================================================
 async function openInvestigation(m) {
-  // 简版：直接展示清单 + 让用户勾选，本地保存结论（不写库）
-  // 完整版需要新 API /api/ooc/<id>/investigate
-  const checklistData = {
-    "随机误差": ["重测控制品", "检查吸样/加样误差", "检查电压/温度/气泡", "检查试剂瓶/瓶间差"],
-    "系统误差": ["校准/重新定标", "换新批号试剂", "换新批号控制品", "检查仪器状态（光源/管路）", "检查标准曲线"],
-    "其他": ["复测样本", "通知主管/组长", "查看历史趋势"],
-  };
+  // 清单内容统一走后端 plan 接口（spec §F.1 原文分类；2026-10-14 用户拍板）
+  let cats = [];
+  try {
+    const plan = await api("GET", `/api/investigation/plan?rules=${encodeURIComponent(m.rules || "")}`);
+    cats = plan.categories || [];
+  } catch (e) { /* api() 已 toast；面板仍展示基础信息 */ }
   let html = `
     <div class="f2-tips">
-      <b>失控后处理提示（spec §F.2）：</b><br>
+      <b>失控后正确处理流程（spec §F.2）：</b><br>
       1. 不要立即抹去失控点<br>
       2. 不要只用「重做控制品」来掩盖<br>
       3. 不要将厂商定值与允许范围作为本实验室控制图的均值/SD<br>
       4. 不要把以前已纠正的失控值再纳入跨批规则判定
     </div>
-    <div><b>触发：</b>${m.date} seq=${m.seq} value=${m.value?.toFixed(3)} 规则=${m.rules}</div>
+    <div style="font-size:12px; margin:8px 0; color:var(--slate-700);">
+      <b>触发详情：</b>${m.date} #${m.seq} 测定值=${m.value?.toFixed(3)} · <b>触发规则：</b><span style="color:var(--danger);font-weight:bold;">${escapeHtml(m.rules || "—")}</span>
+    </div>
   `;
-  for (const [cat, items] of Object.entries(checklistData)) {
-    html += `<div class="checklist-group"><h4>${cat}</h4>`;
-    for (const it of items) {
-      html += `<label><input type="checkbox" class="inv-cb" data-cat="${cat}" data-item="${it}"> ${it}</label>`;
+  for (const cat of cats) {
+    html += `<div class="checklist-group"><h4>${escapeHtml(cat.category)}</h4>`;
+    for (const it of cat.items) {
+      html += `<label><input type="checkbox" class="inv-cb" data-cat="${escapeHtml(cat.category)}" data-item="${escapeHtml(it)}"> ${escapeHtml(it)}</label>`;
     }
     html += `</div>`;
   }
-  html += `<div class="form-row"><label>结论</label><input id="inv-conclusion" placeholder="处理结论（可选）"></div>`;
-  html += `<div class="form-actions"><button onclick="saveInvestigation(${m.id})">保存</button><button class="secondary" onclick="closeModal()">关闭</button></div>`;
-  showModal(`失控排查 — 规则 ${m.rules}`, html);
+  html += `<div class="form-row" style="margin-top:8px;"><label>排查结论</label><input id="inv-conclusion" placeholder="处理结论记录（可选）"></div>`;
+  html += `<div class="form-actions"><button onclick="saveInvestigation(${m.id})">保存排查记录</button><button class="secondary" onclick="closeModal()">关闭</button></div>`;
+  showModal(`失控排查 —— 规则 ${m.rules}`, html);
 }
+
 async function saveInvestigation(mid) {
   const cbs = document.querySelectorAll(".inv-cb:checked");
   if (cbs.length === 0) {
-    toast("error", "请至少勾选一项再保存（spec §F.1 d）");
+    toast("error", "请至少勾选一项检查项再保存（spec §F.1 d）");
     return;
   }
   const items = Array.from(cbs).map(cb => ({
@@ -844,34 +3081,32 @@ async function saveInvestigation(mid) {
     await api("POST", `/api/ooc/${mid}/investigate`, {
       items, conclusion: conclusion || null,
     });
-    toast("success", `已记录排查 id=${mid} · ${items.length} 项`);
+    toast("success", `已保存 #${mid} 失控排查记录 (${items.length}项)`);
     closeModal();
-    setStatus(`已记录 id=${mid} 排查项 ${items.length} 项`);
+    setStatus(`已保存 #${mid} 失控排查记录`);
   } catch (e) { /* api() 已 toast */ }
 }
 
 // ============================================================================
-// 报表
+// 报表中心 (spec §G.1)
 // ============================================================================
 async function openReports() {
   if (!state.currentProjectId) { toast("error", "请先选项目"); return; }
   const p = state.projects.find(x => x.id === state.currentProjectId);
   const y = $("chart-year").value;
   const m = $("chart-month").value;
-  showModal(`报表 — ${p.name}`, `
+  showModal(`报表中心 —— ${p.name}`, `
     <div class="form">
-      <h3>月报（${y}年${m}月）</h3>
-      <div class="form-actions">
-        <a href="/api/export/monthly.xlsx?project_id=${p.id}&year=${y}&month=${m}">
-          <button>下载月度质控报告 xlsx</button>
-        </a>
+      <h3 style="font-size:13px; font-weight:600; color:var(--slate-800); margin-bottom:4px;">月度质控报告（${y}年${m}月）</h3>
+      <div class="form-actions" style="margin-bottom:12px;">
+        <button onclick="openExportModal(${p.id}, ${y}, ${m})">选择导出指标 (spec §G.1)</button>
       </div>
-      <h3>失控记录</h3>
-      <div class="form-row"><label>起</label><input type="date" id="rep-from" value="${y}-${String(m).padStart(2,'0')}-01"></div>
-      <div class="form-row"><label>止</label><input type="date" id="rep-to" value="${y}-${String(m).padStart(2,'0')}-${new Date(y, m, 0).getDate()}"></div>
-      <div class="form-actions">
-        <a id="rep-xlsx-link" href="#"><button>下载失控记录 xlsx</button></a>
-        <a id="rep-pdf-link" href="#"><button class="secondary">下载失控记录 PDF</button></a>
+      <h3 style="font-size:13px; font-weight:600; color:var(--slate-800); margin-bottom:4px;">失控记录台账</h3>
+      <div class="form-row"><label>起始日期</label><input type="date" id="rep-from" value="${y}-${String(m).padStart(2,'0')}-01"></div>
+      <div class="form-row"><label>截止日期</label><input type="date" id="rep-to" value="${y}-${String(m).padStart(2,'0')}-${new Date(y, m, 0).getDate()}"></div>
+      <div class="form-actions" style="margin-top:8px;">
+        <a id="rep-xlsx-link" href="#"><button>导出 Excel 失控表</button></a>
+        <a id="rep-pdf-link" href="#"><button class="secondary">导出 PDF 失控表</button></a>
       </div>
     </div>
   `, () => {
@@ -887,31 +3122,87 @@ async function openReports() {
   });
 }
 
+async function openExportModal(pid, y, m) {
+  const items = await api("GET", `/api/projects/${pid}/test_items`);
+  if (!items || items.length === 0) {
+    toast("error", "该项目暂无检测指标");
+    return;
+  }
+  const checkboxes = items.map(it => `
+    <label style="display:flex; align-items:center; gap:6px; padding: 4px 0; cursor:pointer; font-size:12px;">
+      <input type="checkbox" class="exp-ti-cb" value="${it.id}" checked>
+      <b>${escapeHtml(it.name)}</b> · ${escapeHtml(it.lot)} · ${it.level} (靶=${it.target}, SD=${it.sd})
+    </label>
+  `).join("");
+
+  showModal("选择导出指标 (spec §G.1)", `
+    <div id="modal-export" style="padding: 4px 0;">
+      <p style="color:var(--slate-500); font-size:12px; margin-bottom:8px;">勾选要包含在月度质控报告中的检测指标：</p>
+      <div style="max-height: 240px; overflow-y: auto; border: 1px solid var(--slate-200); padding: 8px; border-radius: var(--radius-md); margin-bottom: 12px;">
+        ${checkboxes}
+      </div>
+      <div class="form-actions">
+        <button onclick="downloadMonthlySelected(${pid}, ${y}, ${m})">下载月度质控报告</button>
+        <button class="secondary" onclick="document.querySelectorAll('.exp-ti-cb').forEach(c=>c.checked=true)">全选</button>
+        <button class="secondary" onclick="document.querySelectorAll('.exp-ti-cb').forEach(c=>c.checked=false)">全不选</button>
+        <button class="secondary" onclick="closeModal()">取消</button>
+      </div>
+    </div>
+  `);
+}
+
+function downloadMonthlySelected(pid, y, m) {
+  const chosen = Array.from(document.querySelectorAll(".exp-ti-cb:checked")).map(cb => cb.value);
+  if (chosen.length === 0) {
+    toast("error", "请至少勾选一个指标");
+    return;
+  }
+  closeModal();
+  const url = `/api/export/monthly.xlsx?project_id=${pid}&year=${y}&month=${m}&selected=${encodeURIComponent(chosen.join(","))}`;
+  window.location.href = url;
+}
+
 function openChart() {
-  // 已经在中间面板展示
   document.querySelector('.chart-container').scrollIntoView({behavior: "smooth"});
 }
 
 async function openBackups() {
   const list = await api("GET", "/api/backups");
-  let html = `<table><tr><th>文件名</th><th>大小 (B)</th><th>修改时间</th></tr>`;
+  let html = `<table><tr><th>文件名</th><th>文件大小</th><th>修改时间</th><th>操作</th></tr>`;
   for (const b of list) {
     const dt = new Date(b.mtime * 1000).toLocaleString();
-    html += `<tr><td>${b.name}</td><td>${b.size}</td><td>${dt}</td></tr>`;
+    html += `<tr>
+      <td>${escapeHtml(b.name)}</td>
+      <td>${(b.size / 1024).toFixed(1)} KB</td>
+      <td>${dt}</td>
+      <td><button class="danger" style="height:24px; padding:0 8px; font-size:11px;" onclick="restoreBackup('${escapeHtml(b.name)}')">恢复此备份</button></td>
+    </tr>`;
   }
-  if (list.length === 0) html += `<tr><td colspan="3" class="empty">暂无备份</td></tr>`;
-  html += `</table><p style="color:#888; font-size:11px">（恢复功能本期占位：spec §8.2 + AGENTS.md 铁律 6）</p>`;
-  showModal("从备份恢复…", html);
+  if (list.length === 0) html += `<tr><td colspan="4" class="empty">暂无数据库备份</td></tr>`;
+  html += `</table><p style="color:var(--slate-500); font-size:11px; margin-top:8px;">说明：恢复前系统会自动为当前数据库生成带时间戳的安全应急备份。</p>`;
+  showModal("从备份恢复 (spec §8.2)", html);
+}
+
+async function restoreBackup(bname) {
+  if (!confirm(`确认从备份「${bname}」恢复？\n\n警告：当前数据库内容将被备份覆盖！恢复完成后页面将自动刷新。`)) {
+    return;
+  }
+  try {
+    await api("POST", `/api/backups/${encodeURIComponent(bname)}/restore`);
+    closeModal();
+    toast("success", `恢复成功！正在重新载入数据…`);
+    setTimeout(() => {
+      window.location.reload();
+    }, 1200);
+  } catch (e) {
+    toast("error", "恢复失败: " + (e?.message || e));
+  }
 }
 
 // ============================================================================
-// spec §B.2 + §B.3：下载模板 / 全量预览批量导入
+// spec §B.2 + §B.3：下载模板 / Excel 批量导入
 // ============================================================================
-
 async function downloadTemplate() {
-  // spec §B.3：GET /api/template.xlsx → 保存到本地
-  // 不走 api() 因为返回的是 xlsx 二进制（application/octet-stream），
-  // api() 内部 JSON.parse 必失败。
   try {
     setStatus("正在下载模板…");
     const r = await fetch("/api/template.xlsx");
@@ -936,45 +3227,202 @@ async function downloadTemplate() {
 }
 
 async function onImportFileSelected(ev) {
-  // spec §B.2：选完文件 → 全量预览 → 确认导入
   const f = ev.target.files[0];
-  // 重置 input value，以便同一文件可再次选择
   ev.target.value = "";
   if (!f) return;
-  if (!state.currentTestItemId) {
-    toast("error", "请先选检测指标（导入与当前选中的指标绑定）");
+  await handleBatchUpload(f);
+}
+
+// 暂存当前准备导入的文件及预解析结果
+let currentImportContext = {
+  file: null,
+  previewData: null,
+};
+
+async function previewImportXlsx(f) {
+  const it = state.currentTestItem;
+  if (!it) {
+    toast("error", "请先在左侧选择检测指标");
     return;
   }
-  if (!f.name.toLowerCase().endsWith(".xlsx")) {
-    toast("error", "请选择 .xlsx 文件");
+  const fd = new FormData();
+  fd.append("file", f);
+  try {
+    setStatus(`正在预解析 ${f.name}…`);
+    const r = await fetch(`/api/test_items/${it.id}/preview_import`, {
+      method: "POST",
+      headers: { "X-Project-Name-Id": String(state.currentProjectId) },
+      body: fd,
+    });
+    const text = await r.text();
+    let body;
+    try { body = text ? JSON.parse(text) : null; } catch { body = { error: text }; }
+    if (!r.ok) {
+      const msg = (body && body.error) || r.statusText || "文件解析异常";
+      openImportErrorModal("导入文件检查失败", msg, f.name);
+      setStatus("导入文件检查失败");
+      return;
+    }
+    currentImportContext = { file: f, previewData: body };
+    openImportPreviewModal(body, f);
+    setStatus(`已解析 ${f.name}：共 ${body.total_count} 行（可导入 ${body.ok_count} 行，异常 ${body.skipped_count} 行）`);
+  } catch (e) {
+    openImportErrorModal("解析发生网络或系统错误", e.message, f.name);
+  }
+}
+
+function openImportPreviewModal(preview, f) {
+  const okRows = preview.ok_rows || [];
+  const skippedRows = preview.skipped_rows || [];
+  const total = preview.total_count || (okRows.length + skippedRows.length);
+  const canImport = preview.can_import && okRows.length > 0;
+
+  let html = `
+    <div style="min-width:620px; max-width:820px;">
+      <!-- 汇总卡片 -->
+      <div style="display:flex; gap:12px; margin-bottom:12px;">
+        <div style="flex:1; background:var(--slate-50); border:1px solid var(--slate-200); border-radius:var(--radius-sm); padding:10px 14px;">
+          <div style="font-size:11px; color:var(--slate-500);">文件信息</div>
+          <div style="font-weight:600; color:var(--slate-800); margin-top:2px; word-break:break-all;">${escapeHtml(f.name)} (${(f.size / 1024).toFixed(1)} KB)</div>
+        </div>
+        <div style="width:110px; background:var(--slate-50); border:1px solid var(--slate-200); border-radius:var(--radius-sm); padding:10px 14px; text-align:center;">
+          <div style="font-size:11px; color:var(--slate-500);">数据总行数</div>
+          <div style="font-weight:700; font-size:16px; color:var(--slate-800); margin-top:2px;">${total}</div>
+        </div>
+        <div style="width:110px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:var(--radius-sm); padding:10px 14px; text-align:center;">
+          <div style="font-size:11px; color:#166534;">可导入行数</div>
+          <div style="font-weight:700; font-size:16px; color:var(--success); margin-top:2px;">${okRows.length}</div>
+        </div>
+        <div style="width:110px; background:#fef2f2; border:1px solid #fecaca; border-radius:var(--radius-sm); padding:10px 14px; text-align:center;">
+          <div style="font-size:11px; color:#991b1b;">异常跳过行数</div>
+          <div style="font-weight:700; font-size:16px; color:var(--danger); margin-top:2px;">${skippedRows.length}</div>
+        </div>
+      </div>
+  `;
+
+  if (skippedRows.length > 0) {
+    html += `
+      <div style="background:#fff1f2; border:1px solid #fecdd3; border-radius:var(--radius-sm); padding:10px 14px; margin-bottom:12px;">
+        <div style="font-weight:600; color:#9f1239; font-size:12px; margin-bottom:6px;">⚠️ 发现 ${skippedRows.length} 处格式问题（这部分数据将被跳过，不影响正常数据导入）：</div>
+        <div style="max-height:100px; overflow-y:auto; font-size:11px; color:#be123c; line-height:1.6;">
+          ${skippedRows.map(s => `<div>• <b>第 ${s.original_row_no} 行</b>：${escapeHtml(s.reason)}</div>`).join("")}
+        </div>
+      </div>
+    `;
+  }
+
+  html += `
+    <div style="font-size:12px; font-weight:600; color:var(--slate-700); margin-bottom:6px;">数据预览列表（前 100 行）：</div>
+    <div style="max-height:280px; overflow-y:auto; border:1px solid var(--slate-200); border-radius:var(--radius-sm); margin-bottom:12px;">
+      <table style="width:100%; border-collapse:collapse; font-size:11px;">
+        <thead>
+          <tr style="background:var(--slate-50); position:sticky; top:0; z-index:1;">
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--slate-200); width:50px;">行号</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--slate-200);">项目名</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--slate-200);">检测指标</th>
+            <th style="padding:6px 8px; text-align:center; border-bottom:1px solid var(--slate-200); width:50px;">水平</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--slate-200); width:70px;">批号</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--slate-200); width:85px;">日期</th>
+            <th style="padding:6px 8px; text-align:right; border-bottom:1px solid var(--slate-200); width:75px;">测定值</th>
+            <th style="padding:6px 8px; text-align:center; border-bottom:1px solid var(--slate-200); width:50px;">序号</th>
+            <th style="padding:6px 8px; text-align:left; border-bottom:1px solid var(--slate-200); width:90px;">预检状态</th>
+          </tr>
+        </thead>
+        <tbody>
+  `;
+
+  if (okRows.length === 0) {
+    html += `<tr><td colspan="9" style="text-align:center; padding:20px; color:var(--danger);">暂无可正常导入的有效数据行，请检查表格格式后重新上传</td></tr>`;
+  } else {
+    const displayRows = okRows.slice(0, 100);
+    for (const r of displayRows) {
+      html += `
+        <tr style="border-bottom:1px solid var(--slate-100);">
+          <td style="padding:5px 8px; color:var(--slate-400);">#${r.original_row_no}</td>
+          <td style="padding:5px 8px;">${escapeHtml(r.project_name)}</td>
+          <td style="padding:5px 8px;">${escapeHtml(r.test_item_name)}</td>
+          <td style="padding:5px 8px; text-align:center;"><span style="font-weight:600; color:${r.level==='H'?'var(--danger)':'var(--primary)'};">${escapeHtml(r.level)}</span></td>
+          <td style="padding:5px 8px;">${escapeHtml(r.lot)}</td>
+          <td style="padding:5px 8px; font-family:var(--font-mono);">${escapeHtml(r.date)}</td>
+          <td style="padding:5px 8px; text-align:right; font-weight:600; font-family:var(--font-mono);">${r.value}</td>
+          <td style="padding:5px 8px; text-align:center; color:var(--slate-500);">${r.seq ?? 0}</td>
+          <td style="padding:5px 8px; color:var(--success); font-weight:600;">✓ 正常待导入</td>
+        </tr>
+      `;
+    }
+    if (okRows.length > 100) {
+      html += `<tr><td colspan="9" style="text-align:center; padding:8px; color:var(--slate-500); background:var(--slate-50);">… 还有 ${okRows.length - 100} 行数据未展示，确认导入时将全量入库</td></tr>`;
+    }
+  }
+
+  html += `
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 底部操作按钮 -->
+    <div class="form-actions" style="margin-top:14px; display:flex; justify-content:flex-end; gap:8px;">
+      <button class="secondary" onclick="closeModal()">取消导入</button>
+      <button ${!canImport ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : ''} onclick="confirmCommitImport()">
+        ${canImport ? `确认导入 ${okRows.length} 行数据` : '无法导入（无有效行）'}
+      </button>
+    </div>
+  </div>`;
+
+  showModal(`Excel 数据导入预览 —— ${escapeHtml(f.name)}`, html);
+}
+
+function openImportErrorModal(title, errorMsg, filename) {
+  const html = `
+    <div style="min-width:420px; max-width:540px;">
+      <div style="display:flex; align-items:flex-start; gap:12px; margin-bottom:14px;">
+        <div style="font-size:24px; line-height:1;">❌</div>
+        <div>
+          <div style="font-weight:700; color:#991b1b; font-size:14px;">${escapeHtml(title)}</div>
+          <div style="font-size:11px; color:var(--slate-500); margin-top:2px;">文件：${escapeHtml(filename || "上传的 Excel 文件")}</div>
+        </div>
+      </div>
+      
+      <div style="background:#fef2f2; border:1px solid #fecaca; border-radius:var(--radius-sm); padding:12px 14px; margin-bottom:14px;">
+        <div style="font-weight:600; color:#b91c1c; font-size:12px; margin-bottom:6px;">系统诊断原因：</div>
+        <div style="font-size:12px; color:#7f1d1d; line-height:1.6; word-break:break-all;">
+          ${escapeHtml(errorMsg)}
+        </div>
+      </div>
+
+      <div class="f2-tips" style="font-size:11px; line-height:1.6; margin-bottom:14px;">
+        <b>💡 常见排查与处理建议：</b><br>
+        1. <b>缺少必需列</b>：请确保包含「项目名、检测指标、水平、批号、日期、测定值」6 列（可点击“下载标准模板”对比）；<br>
+        2. <b>项目或指标不存在</b>：请先在左侧新建对应的项目与检测指标，再执行导入；<br>
+        3. <b>格式要求</b>：测定日期须为 <code>YYYY-MM-DD</code> 格式，水平须为 <code>L</code> 或 <code>H</code>。
+      </div>
+
+      <div class="form-actions" style="display:flex; justify-content:flex-end; gap:8px;">
+        <button class="secondary" onclick="downloadTemplate()">下载标准模板</button>
+        <button onclick="closeModal()">我知道了</button>
+      </div>
+    </div>
+  `;
+  showModal(`导入问题提示 —— ${escapeHtml(title)}`, html);
+}
+
+async function confirmCommitImport() {
+  const f = currentImportContext.file;
+  if (!f) {
+    toast("error", "未找到待导入文件");
     return;
   }
-  state.importFile = f;
-  setStatus(`正在解析 ${f.name}…`);
-  // 客户端解析：拿 openpyxl 不可行（前端无）→ 走客户端的 SheetJS 也不引依赖
-  // → 直接 POST 到后端，依赖后端解析（excel_io.parse_import_xlsx_bytes）
-  // → 后端不返回预览，只在最终导入时返回 imported/skipped 列表
-  // 但用户拍板 "full-preview" → 必须在上传前显示预览。
-  // 取折中：客户端用 FileReader 把 .xlsx 读成 ArrayBuffer → POST 到后端的同一个
-  // 端点 → 拿回 imported_count + skipped_rows → 弹预览让用户确认"已导入 X 条" +
-  // "跳过 N 条" 列出详情。spec 原文"全量预览 → 确认导入"在 web 端无法不引依赖做
-  // 真实预览（要 SheetJS）。故此处用后端 dry-run 预解析端点。
-  // 但当前 web.py 没有 dry-run 端点——为了不偏离"业务模块 0 修改"铁律，
-  // 这里实现"先 POST 拿回结果 → 弹窗让用户看 imported/skipped 详情 + 接受/撤销"。
-  // 接受 → 已入库；撤销 → 物理上无法回滚（业务层不暴露 rollback API）。
-  // 故本期预览 = "上传后立即返回结果" + 弹窗展示 + 不做撤销。
-  // 这是 PR#1 范围内的折中：spec "全量预览"在纯前端无依赖前提下无法 100% 实现。
+  closeModal();
   await importXlsxNow(f);
 }
 
 async function importXlsxNow(f) {
-  // spec §B.2：POST xlsx → 弹窗显示 imported_count / skipped_rows 详情
   const it = state.currentTestItem;
   if (!it) return;
   const fd = new FormData();
   fd.append("file", f);
   try {
-    setStatus(`正在导入 ${f.name}…`);
+    setStatus(`正在写入数据库 ${f.name}…`);
     const r = await fetch(`/api/test_items/${it.id}/import`, {
       method: "POST",
       headers: { "X-Project-Name-Id": String(state.currentProjectId) },
@@ -984,60 +3432,236 @@ async function importXlsxNow(f) {
     let body;
     try { body = text ? JSON.parse(text) : null; } catch { body = { error: text }; }
     if (!r.ok) {
-      const msg = (body && body.error) || r.statusText;
-      toast("error", "导入失败：" + msg);
+      const msg = (body && body.error) || r.statusText || "导入保存失败";
+      openImportErrorModal("导入入库保存失败", msg, f.name);
       setStatus("导入失败");
       return;
     }
-    // 弹"全量预览"式结果窗：显示 imported / skipped 详情
     showImportResultModal(body, f.name);
-    // 刷新列表
     await loadMeasurements();
     refreshChart();
     loadStats();
-    setStatus(`已导入 ${body.imported_count ?? 0} 条 / 跳过 ${(body.skipped_rows || []).length} 条`);
+    setStatus(`已成功导入 ${body.imported_count ?? 0} 条 / 跳过 ${(body.skipped_rows || []).length} 条`);
   } catch (e) {
-    toast("error", "导入出错：" + e.message);
+    openImportErrorModal("入库保存发生异常", e.message, f.name);
   }
 }
 
 function showImportResultModal(body, filename) {
-  // spec §B.2 全量预览：显示导入结果 + 跳过行详情
   const imported = body.imported_count ?? 0;
   const skipped = body.skipped_rows || [];
   let html = `
-    <div class="f2-tips">
-      <b>文件：</b>${filename}<br>
-      <b>导入成功：</b><span style="color:#27ae60; font-weight:bold">${imported}</span> 条<br>
-      <b>跳过：</b><span style="color:#c0392b; font-weight:bold">${skipped.length}</span> 条
+    <div class="f2-tips" style="margin-bottom:12px;">
+      <b>文件名称：</b>${escapeHtml(filename)}<br>
+      <b>成功导入：</b><span style="color:var(--success); font-weight:bold;">${imported}</span> 条数据<br>
+      <b>格式跳过：</b><span style="color:var(--danger); font-weight:bold;">${skipped.length}</span> 条数据
     </div>
   `;
   if (skipped.length > 0) {
-    html += `<h4 style="margin:8px 0 4px; color:#c0392b">跳过行详情：</h4>`;
-    html += `<table style="font-size:11px; max-height:300px; overflow-y:auto; display:block">`;
-    html += `<thead><tr><th>行号</th><th>原因</th></tr></thead><tbody>`;
+    html += `<h4 style="margin:8px 0 6px; color:var(--danger); font-size:12px;">跳过行明细清单：</h4>`;
+    html += `<div style="max-height:260px; overflow-y:auto; border:1px solid var(--slate-200); border-radius:var(--radius-sm);">`;
+    html += `<table><thead><tr><th style="width:70px;">行号</th><th>跳过原因</th></tr></thead><tbody>`;
     for (const s of skipped) {
-      html += `<tr><td>${s.original_row_no}</td><td>${escapeHtml(s.reason)}</td></tr>`;
+      html += `<tr><td>第 ${s.original_row_no} 行</td><td>${escapeHtml(s.reason)}</td></tr>`;
     }
-    html += `</tbody></table>`;
-  } else {
-    html += `<p style="color:#888; font-size:11px; margin-top:8px">无错误行。</p>`;
+    html += `</tbody></table></div>`;
   }
-  html += `<div class="form-actions" style="margin-top:10px">
-    <button onclick="closeModal()">关闭</button>
+  html += `<div class="form-actions" style="margin-top:14px;">
+    <button onclick="closeModal()">完成并关闭</button>
   </div>`;
-  showModal(`批量导入结果 — ${filename}`, html);
+  showModal(`批量导入成功 —— ${escapeHtml(filename)}`, html);
 }
 
 function escapeHtml(s) {
-  return String(s)
+  return String(s ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 }
 
+// ============================================================================
+// 右侧录入面板：单条 / 批量切换与文件拖拽上传
+// ============================================================================
+// ============================================================================
+// 录入弹框体系：单条手工录入 & 批量导入 Excel (两栏大屏设计)
+// ============================================================================
+function openSingleEntryModal() {
+  if (!state.currentTestItem) {
+    toast("error", "请先在左侧选择检测指标");
+    return;
+  }
+  const it = state.currentTestItem;
+  const proj = state.projects.find(p => p.id === state.currentProjectId);
+  const projName = proj ? proj.name : "";
+  const today = new Date().toISOString().slice(0, 10);
+  const curSeq = state.nextSeq || 1;
+
+  // 1. 提取同项目所有检测指标中的建档人员
+  const projectItems = state.testItems ? state.testItems.filter(x => x.project_id === state.currentProjectId) : [];
+  const operators = Array.from(new Set(projectItems.map(x => (x.operator || "").trim()).filter(Boolean)));
+  const preProcessors = Array.from(new Set(projectItems.map(x => (x.pre_processor || "").trim()).filter(Boolean)));
+
+  const defaultOp = it.operator || (operators.length > 0 ? operators[0] : "");
+  const defaultPp = it.pre_processor || (preProcessors.length > 0 ? preProcessors[0] : "");
+
+  // 2. 匹配同名同批号的配对水平（L 和 H）
+  const siblings = state.testItems ? state.testItems.filter(x => x.name === it.name && x.lot === it.lot) : [];
+  const itemL = siblings.find(x => x.level === "L") || (it.level === "L" ? it : null);
+  const itemH = siblings.find(x => x.level === "H") || (it.level === "H" ? it : null);
+
+  const opOptions = operators.map(o => `<option value="${escapeHtml(o)}">`).join("");
+  const ppOptions = preProcessors.map(p => `<option value="${escapeHtml(p)}">`).join("");
+
+  const html = `
+    <div class="form" id="entry-form" style="min-width:420px;">
+      <div class="form-row"><label>检验项目</label><input id="ef-project" value="${escapeHtml(projName)}" disabled></div>
+      <div class="form-row"><label>检测指标</label><input id="ef-ti" value="${escapeHtml(it.name)}" disabled></div>
+      <div class="form-row"><label>批号</label><input id="ef-lot" value="${escapeHtml(it.lot || 'LOT1')}"></div>
+      <div class="form-row"><label>测定日期</label><input type="date" id="ef-date" value="${today}"></div>
+      <div class="form-row"><label>序号</label><input type="number" id="ef-seq" value="${curSeq}" min="1" max="999"></div>
+
+      <!-- 高低水平测定值同时展现与填报 -->
+      <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 12px; margin:6px 0; display:flex; flex-direction:column; gap:8px;">
+        <div style="font-size:12px; font-weight:600; color:#334155; margin-bottom:2px;">双水平测定值同时填报（填哪个录哪个，留空跳过）：</div>
+        <div class="form-row" style="margin:0;">
+          <label style="color:#0284c7; font-weight:600;">低水平 (L) 测定值</label>
+          <input type="number" id="ef-value-l" data-tid="${itemL ? itemL.id : it.id}" placeholder="${itemL ? `靶值: ${itemL.target} (SD: ${itemL.sd})` : '未配置低水平'}" step="0.001">
+        </div>
+        <div class="form-row" style="margin:0;">
+          <label style="color:#db2777; font-weight:600;">高水平 (H) 测定值</label>
+          <input type="number" id="ef-value-h" data-tid="${itemH ? itemH.id : it.id}" placeholder="${itemH ? `靶值: ${itemH.target} (SD: ${itemH.sd})` : '未配置高水平'}" step="0.001">
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label>操作人员</label>
+        <input id="ef-operator" list="ef-operator-list" value="${escapeHtml(defaultOp)}" placeholder="选择或输入操作人">
+        <datalist id="ef-operator-list">${opOptions}</datalist>
+      </div>
+      <div class="form-row">
+        <label>前处理人员</label>
+        <input id="ef-pre-processor" list="ef-pre-processor-list" value="${escapeHtml(defaultPp)}" placeholder="选择或输入前处理人">
+        <datalist id="ef-pre-processor-list">${ppOptions}</datalist>
+      </div>
+      <div class="form-row"><label>备注说明</label><input id="ef-note" placeholder="可选填"></div>
+      <div class="form-actions" style="margin-top:12px;">
+        <button style="flex:1;" onclick="submitEntry()">保存并判定</button>
+        <button class="secondary" onclick="resetEntry()">清空</button>
+        <button class="secondary" onclick="closeModal()">取消</button>
+      </div>
+    </div>
+  `;
+  showModal(`单条手工录入 —— ${escapeHtml(it.name)} (高低双水平)`, html);
+}
+
+function openBatchImportModal() {
+  if (!state.currentTestItem) {
+    toast("error", "请先在左侧选择检测指标");
+    return;
+  }
+  const it = state.currentTestItem;
+  const html = `
+    <div style="min-width:420px; display:flex; flex-direction:column; gap:12px;">
+      <div class="f2-tips">
+        <b>批量录入规范：</b><br>
+        1. 必须使用标准 6 列模板（项目名、检测指标、水平、批号、日期、测定值）<br>
+        2. 支持跨水平(L/H)及同批多指标数据一次性导入并即时触发 Westgard 规则判定<br>
+        3. 如格式错误将自动跳过并生成明细清单
+      </div>
+
+      <button class="secondary" id="btn-batch-template" style="width:100%; height:34px;" onclick="downloadTemplate()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        下载 Excel 批量导入模板
+      </button>
+
+      <div class="batch-upload-box" id="batch-drop-zone" onclick="document.getElementById('file-batch-import').click()">
+        <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="12" y1="18" x2="12" y2="12"/>
+          <polyline points="9 15 12 12 15 15"/>
+        </svg>
+        <div style="font-weight:600; color:var(--slate-800);">点击选择文件 或 将 .xlsx 拖拽至此处</div>
+        <div class="hint">严格支持 .xlsx 模板，导入后即时触发规则判定</div>
+        <input type="file" id="file-batch-import" accept=".xlsx" style="display:none" onchange="onBatchFileSelected(event)">
+      </div>
+
+      <div id="batch-file-info" style="font-size:11px; color:var(--slate-600); margin-top:4px; display:none;"></div>
+
+      <div class="form-actions" style="border-top:1px solid var(--slate-200); padding-top:10px;">
+        <button class="secondary" style="margin-left:auto;" onclick="closeModal()">关闭</button>
+      </div>
+    </div>
+  `;
+  showModal(`批量导入 Excel —— ${escapeHtml(it.name)}`, html, () => {
+    initBatchDropZone();
+  });
+}
+
+function switchEntryMode(mode) {
+  const isSingle = mode === "single";
+  const tabS = $("tab-entry-single");
+  const tabB = $("tab-entry-batch");
+  const panS = $("panel-entry-single");
+  const panB = $("panel-entry-batch");
+  if (tabS) tabS.classList.toggle("active", isSingle);
+  if (tabB) tabB.classList.toggle("active", !isSingle);
+  if (panS) panS.style.display = isSingle ? "block" : "none";
+  if (panB) panB.style.display = isSingle ? "none" : "flex";
+}
+
+async function onBatchFileSelected(ev) {
+  const f = ev.target.files[0];
+  ev.target.value = "";
+  if (!f) return;
+  await handleBatchUpload(f);
+}
+
+async function handleBatchUpload(f) {
+  if (!state.currentTestItemId) {
+    toast("error", "请先在左侧选择检测指标（导入与当前选中的项目与指标绑定）");
+    return;
+  }
+  if (!f.name.toLowerCase().endsWith(".xlsx")) {
+    openImportErrorModal("文件格式不正确", "仅支持上传 .xlsx 格式的标准 Excel 文件，请检查文件后缀。", f.name);
+    return;
+  }
+  const infoEl = $("batch-file-info");
+  if (infoEl) {
+    infoEl.style.display = "block";
+    infoEl.textContent = `已选择：${f.name} (${(f.size / 1024).toFixed(1)} KB)，正在分析预览…`;
+  }
+  await previewImportXlsx(f);
+}
+
+function initBatchDropZone() {
+  const zone = $("batch-drop-zone");
+  if (!zone) return;
+  ["dragenter", "dragover"].forEach(name => {
+    zone.addEventListener(name, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.add("dragover");
+    });
+  });
+  ["dragleave", "drop"].forEach(name => {
+    zone.addEventListener(name, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      zone.classList.remove("dragover");
+    });
+  });
+  zone.addEventListener("drop", async (e) => {
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      await handleBatchUpload(files[0]);
+    }
+  });
+}
+
 init();
+initBatchDropZone();
 </script>
 </body>
 </html>

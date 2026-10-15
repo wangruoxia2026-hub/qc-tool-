@@ -173,6 +173,7 @@ def monthly_has_data(
 _SHEET1_NAME = "{label} - 本月原始"
 _SHEET2_NAME = "{label} - 累计统计"
 _SHEET3_NAME = "{label} - 去失控累计"
+_SHEET4_NAME = "{label} - 质控图"
 # Excel sheet 名最长 31 字符
 _SHEET_NAME_MAX = 31
 
@@ -369,6 +370,71 @@ def _describe_cumulative_range(
     return f"第一条质控数据 {start_s} ~ 上一自然月最后一天 {last_prev}（不含当月）"
 
 
+def _write_sheet4_质控图(
+    wb: Workbook,
+    conn: sqlite3.Connection,
+    *,
+    label: str,
+    project_name: str,
+    test_item_name: str,
+    level: str,
+    lot: str,
+    year: int,
+    month: int,
+) -> None:
+    """G.1 sheet 4: 质控图（用户需求 2026-10-12 第二次补充）。
+
+    - 同指标名同批号存在 L+H 两水平 → 嵌入【一图双 y 轴】
+      （render_lj_chart_dual_axis，左轴 L、右轴 H，控制限重合；
+      spec §10 第 14 条经用户拍板开放）。
+    - 只有单水平 → 嵌入单水平图（render_lj_chart）。
+    - 该月无数据 → 嵌入占位图（各渲染函数内置 "No Data" 处理）。
+    """
+    # 延迟导入：openpyxl 嵌图依赖 Pillow；lj_chart 依赖 matplotlib
+    from openpyxl.drawing.image import Image as XlsxImage
+    from . import lj_chart as LJ
+
+    sheet_name = _truncate_sheet_name(_SHEET4_NAME.format(label=label))
+    ws = wb.create_sheet(sheet_name)
+    ws.cell(row=1, column=1,
+            value=f"{project_name} · {test_item_name} · 批号 {lot} · "
+                  f"{year:04d}-{month:02d} 质控图（双 y 轴：左 L，右 H）")
+
+    pid = _resolve_project(conn, project_name)
+    meta = LJ.make_default_meta()
+
+    sibling = conn.execute(
+        "SELECT level FROM test_items "
+        "WHERE project_id = ? AND name = ? AND lot = ? AND level != ? LIMIT 1",
+        (pid, test_item_name, lot, level),
+    ).fetchone()
+
+    if sibling is not None:
+        # 双水平：直接查 L / H 两水平（sibling 存在保证两水平都在）
+        data_l = LJ.compute_chart_data(
+            conn, project_id=pid, test_item_name=test_item_name,
+            lot=lot, level="L", year=year, month=month,
+        )
+        data_h = LJ.compute_chart_data(
+            conn, project_id=pid, test_item_name=test_item_name,
+            lot=lot, level="H", year=year, month=month,
+        )
+        fig = LJ.render_lj_chart_dual_axis(data_l, data_h, meta=meta)
+        disp_w, disp_h = 880, 520   # 11:6.5 比例
+    else:
+        data = LJ.compute_chart_data(
+            conn, project_id=pid, test_item_name=test_item_name,
+            lot=lot, level=level, year=year, month=month,
+        )
+        fig = LJ.render_lj_chart(data, meta=meta)
+        disp_w, disp_h = 880, 520    # 11:6.5 比例
+
+    png_bytes = LJ.save_png_to_bytes(fig, dpi=150)
+    img = XlsxImage(io.BytesIO(png_bytes))
+    img.width, img.height = disp_w, disp_h
+    ws.add_image(img, "A3")
+
+
 def build_monthly_report_xlsx(
     conn: sqlite3.Connection,
     *,
@@ -415,6 +481,13 @@ def build_monthly_report_xlsx(
             wb, conn,
             label=label, test_item_id=ti_id,
             lot=ti_row["lot"], level=ti_row["level"],
+        )
+        _write_sheet4_质控图(
+            wb, conn,
+            label=label, project_name=project_name,
+            test_item_name=ti_row["name"], level=ti_row["level"],
+            lot=ti_row["lot"],
+            year=year, month=month,
         )
     buf = io.BytesIO()
     wb.save(buf)
